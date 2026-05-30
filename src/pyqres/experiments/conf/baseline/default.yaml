@@ -1,0 +1,8 @@
+n_res: 200
+spectral_radius: 0.8
+input_scale: 0.1
+leak_rate: 0.3
+ridge_l2: 1.0e-4
+seed: 2
+state_clip: 5.0
+power_iter: 200

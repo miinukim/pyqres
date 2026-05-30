@@ -1,0 +1,16 @@
+defaults:
+  - experiment: default
+  - reservoir: channel_map
+  - task: stm
+  - baseline: default
+  - logging: local
+  - _self_
+
+hydra:
+  job:
+    name: ${experiment.name}
+  run:
+    dir: outputs/${experiment.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}_${reservoir.kind}_${task.name}_seed=${experiment.seed}
+  sweep:
+    dir: multirun/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: reservoir=${reservoir.kind},task=${task.name},seed=${experiment.seed},job=${hydra.job.num}

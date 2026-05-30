@@ -1,0 +1,4 @@
+save_resolved_config: true
+save_metrics: true
+save_summary: true
+save_arrays: true

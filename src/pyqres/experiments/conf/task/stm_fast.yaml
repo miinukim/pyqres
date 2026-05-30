@@ -1,0 +1,10 @@
+name: stm
+T_total: 200
+washout: 20
+train_len: 100
+test_len: 50
+delays: [1, 2, 3, 4, 5]
+input_dist: uniform_pm1
+input_seed: ${experiment.seed}
+ridge_l2: 1.0e-6
+metric: r2

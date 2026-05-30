@@ -1,0 +1,18 @@
+kind: channel_map
+n_system: 4
+n_ancilla: 2
+tau: 1.0
+input_scale: 1.0
+include_bias: true
+use_shot_noise: false
+shots: 4096
+init_state: maximally_mixed
+seed: ${experiment.seed}
+control:
+  measurement_mode: projective
+  measurement_strength: 1.0
+  post_measurement_mode: reset
+  conditioned_gate: none
+  conditioned_gate_angle: 3.141592653589793
+  conditioned_gate_target: 0
+  conditioned_gate_condition: nonzero

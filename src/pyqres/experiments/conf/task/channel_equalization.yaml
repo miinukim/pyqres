@@ -1,0 +1,13 @@
+name: channel_equalization
+T_total: 3000
+washout: 200
+train_len: 1800
+test_len: 800
+delay: 2
+input_seed: ${experiment.seed}
+ridge_l2: 1.0e-6
+taps: [0.08, 0.12, -0.18, -0.10]
+nonlin2: 0.036
+nonlin3: -0.011
+noise_std: 0.02
+metric: ber
