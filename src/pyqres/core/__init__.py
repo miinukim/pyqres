@@ -1,3 +1,5 @@
+"""Public core API for shared reservoir protocols and configuration helpers."""
+
 from .control import MeasurementControlConfig
 from .protocols import (
     ChannelReservoirProtocol,

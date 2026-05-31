@@ -7,7 +7,7 @@ def test_core_imports():
 
 
 def test_compatibility_imports():
-    from pyqres.exact import ExactQRCModelConfig
+    from pyqres.simulation import ExactQRCModelConfig
     from pyqres.qiskit import QRCReservoir
     from pyqres.dim import IsingReservoirModel, QRCLibExactReservoirModel
     from pyqres.tasks import STMConfig
@@ -21,11 +21,11 @@ def test_compatibility_imports():
     assert ESNConfig is not None
 
 
-def test_exact_and_dim_smoke():
+def test_simulation_and_dim_smoke():
     import numpy as np
 
     from pyqres.dim import QRCLibExactReservoirModel
-    from pyqres.exact import ChannelMapReservoir, ChannelMapReservoirConfig
+    from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
 
     cfg = ChannelMapReservoirConfig(n_system=1, n_ancilla=1, seed=1)
     reservoir = ChannelMapReservoir(cfg)

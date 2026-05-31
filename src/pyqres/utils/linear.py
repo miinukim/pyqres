@@ -1,7 +1,16 @@
 from __future__ import annotations
+"""Small linear-regression utilities used by tasks and baselines."""
+
 import numpy as np
 
 def ridge_regression_fit(X: np.ndarray, y: np.ndarray, l2: float) -> np.ndarray:
+    """Fit a linear readout with Tikhonov regularization.
+
+    The first column is treated as an intercept/bias term by convention and is
+    not regularized. Reservoir features in this package generally include that
+    column explicitly when `include_bias=True`.
+    """
+
     if y.ndim == 1:
         y2 = y[:, None]
     else:
@@ -19,6 +28,8 @@ def ridge_regression_fit(X: np.ndarray, y: np.ndarray, l2: float) -> np.ndarray:
     return w.squeeze()
 
 def ridge_regression_predict(X: np.ndarray, w: np.ndarray) -> np.ndarray:
+    """Apply a fitted ridge readout."""
+
     if not np.isfinite(X).all() or not np.isfinite(w).all():
         raise FloatingPointError("Non-finite values in prediction inputs (X or w).")
     with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
@@ -28,10 +39,14 @@ def ridge_regression_predict(X: np.ndarray, w: np.ndarray) -> np.ndarray:
     return yhat
 
 def rmse(yhat: np.ndarray, y: np.ndarray) -> float:
+    """Root mean squared error with explicit float conversion for metrics dicts."""
+
     yhat = np.asarray(yhat); y = np.asarray(y)
     return float(np.sqrt(np.mean((yhat - y) ** 2)))
 
 def r2_score(y: np.ndarray, yhat: np.ndarray) -> float:
+    """Coefficient of determination; returns 0 when the target variance vanishes."""
+
     y = np.asarray(y).reshape(-1); yhat = np.asarray(yhat).reshape(-1)
     denom = np.var(y)
     if denom <= 1e-12:

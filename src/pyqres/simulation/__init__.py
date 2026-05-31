@@ -1,4 +1,9 @@
-"""Exact dense and channel-map reservoir APIs."""
+"""Dense simulation and channel-map reservoir APIs.
+
+This is the primary namespace for small-system dense simulation backends. Some
+classes retain "Exact" in their names to distinguish exact dense simulation from
+finite-shot trajectory or Qiskit execution.
+"""
 
 from pyqres.core import MeasurementControlConfig, ReservoirParams
 

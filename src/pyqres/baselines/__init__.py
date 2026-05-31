@@ -1,3 +1,10 @@
+"""Public classical baseline and readout API.
+
+This module collects the baseline implementations into a compact namespace so
+experiment code can import `pyqres.baselines` without knowing whether a model is
+implemented in `classical.py` or `esn.py`.
+"""
+
 from .classical import (
     LogisticEqualizerConfig,
     SoftmaxReadoutConfig,

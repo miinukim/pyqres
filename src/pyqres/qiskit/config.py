@@ -1,3 +1,5 @@
+"""Configuration dataclasses for Qiskit-backed reservoirs."""
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional
@@ -19,6 +21,13 @@ ReadoutType = Literal["z_local", "z_local_plus_anc", "pauli_k_local"]
 
 @dataclass
 class NoiseConfig:
+    """Simple Aer noise-model builder.
+
+    The parameters are intentionally backend-agnostic experiment knobs. They are
+    converted to Qiskit Aer errors only when `to_noise_model()` is called, so the
+    rest of the package can import configs even without Qiskit installed.
+    """
+
     use_damping: bool = True
     dt: float = 1.0
     T1: Optional[float] = 100.0
@@ -28,11 +37,15 @@ class NoiseConfig:
     p_depol_2q: float = 0.0
 
     def to_noise_model(self) -> "NoiseModel":
+        """Construct a Qiskit Aer `NoiseModel` from damping/depolarizing settings."""
+
         if NoiseModel is None:
             raise ImportError("qiskit-aer is required for noise models.")
         nm = NoiseModel()
 
         if self.use_damping:
+            # Convert T1/T2-style times into amplitude- and phase-damping
+            # probabilities for one logical circuit time step.
             p_amp = 0.0 if not self.T1 or self.T1 <= 0 else 1.0 - float(np.exp(-self.dt / self.T1))
             if not self.T2 or self.T2 <= 0:
                 p_ph = 0.0
@@ -61,6 +74,8 @@ class NoiseConfig:
 
 @dataclass
 class QRCConfig:
+    """Circuit-reservoir configuration used by `QRCReservoir`."""
+
     n_system: int = 4
     n_ancilla: int = 2
     reservoir_type: ReservoirType = "ising_like"
@@ -82,6 +97,8 @@ class QRCConfig:
     control: MeasurementControlConfig = field(default_factory=MeasurementControlConfig)
 
     def total_qubits(self) -> int:
+        """Return system plus ancilla qubit count."""
+
         return self.n_system + self.n_ancilla
 
 

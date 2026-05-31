@@ -1,3 +1,5 @@
+"""Hydra CLI entry points and runnable benchmark orchestration."""
+
 from __future__ import annotations
 
 import json
@@ -19,9 +21,9 @@ from pyqres.baselines import (
     run_channel_equalization_esn,
     run_stm_esn,
 )
-from pyqres.exact.channel_map import ChannelMapReservoir, ChannelMapReservoirConfig
+from pyqres.simulation.channel_map import ChannelMapReservoir, ChannelMapReservoirConfig
 from pyqres.core.control import MeasurementControlConfig
-from pyqres.exact.hardware import HardwareTrajectoryReservoir, HardwareTrajectoryReservoirConfig
+from pyqres.simulation.hardware import HardwareTrajectoryReservoir, HardwareTrajectoryReservoirConfig
 from pyqres.core.reservoir_params import ReservoirParams
 from pyqres.tasks import (
     ChannelEqualizationConfig,
@@ -39,6 +41,8 @@ ReservoirFactory = Callable[[], Any]
 
 
 def _make_output_dir() -> Path:
+    """Return Hydra's active output directory."""
+
     return Path(HydraConfig.get().runtime.output_dir)
 
 
@@ -49,6 +53,8 @@ def _output_dir_str() -> str:
 
 
 def _to_builtin(obj: Any) -> Any:
+    """Convert NumPy/OmegaConf-like values into JSON-serializable objects."""
+
     if isinstance(obj, dict):
         return {str(k): _to_builtin(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -77,6 +83,8 @@ def _save_run_artifacts(
     arrays: Dict[str, np.ndarray],
     summary: Dict[str, Any],
 ) -> None:
+    """Persist metrics, summaries, arrays, and resolved config based on flags."""
+
     outdir = _make_output_dir()
     if bool(cfg.logging.save_resolved_config):
         OmegaConf.save(cfg, outdir / "resolved_config.yaml", resolve=True)
@@ -97,12 +105,16 @@ def _print_metrics(metrics: Dict[str, Any]) -> None:
 
 
 def _nearest_symbol(values: np.ndarray, symbols: np.ndarray) -> np.ndarray:
+    """Round each value to the nearest allowed channel-eq symbol."""
+
     values = np.asarray(values, dtype=float)[..., None]
     symbols = np.asarray(symbols, dtype=float)
     return symbols[np.argmin(np.abs(values - symbols[None, ...]), axis=-1)]
 
 
 def _collect_esn_symbol_features(esn_cfg: ESNConfig, observed_messages: np.ndarray) -> np.ndarray:
+    """Collect ESN features independently for each observed message."""
+
     observed_messages = np.asarray(observed_messages, dtype=float)
     features = []
     for message in observed_messages:
@@ -117,6 +129,8 @@ def _evaluate_symbol_qrc(
     readout_cfg: SoftmaxReadoutConfig,
     initial_state: np.ndarray,
 ) -> dict[str, float]:
+    """Evaluate the QRC model on symbol-level channel equalization."""
+
     train_features = collect_channel_equalization_reservoir_features(
         reservoir,
         dataset["train_observed"],
@@ -146,6 +160,8 @@ def _evaluate_symbol_esn(
     esn_cfg: ESNConfig,
     readout_cfg: SoftmaxReadoutConfig,
 ) -> dict[str, float]:
+    """Evaluate the ESN baseline on symbol-level channel equalization."""
+
     train_features = _collect_esn_symbol_features(esn_cfg, dataset["train_observed"])
     test_features = _collect_esn_symbol_features(esn_cfg, dataset["test_observed"])
     X_train = train_features.reshape(-1, train_features.shape[-1])
@@ -166,6 +182,8 @@ def _evaluate_symbol_logistic(
     dataset: dict[str, np.ndarray],
     readout_cfg: SoftmaxReadoutConfig,
 ) -> dict[str, float]:
+    """Evaluate a one-observation softmax/logistic baseline."""
+
     X_train = dataset["train_observed"].reshape(-1, 1)
     X_test = dataset["test_observed"].reshape(-1, 1)
     y_train = dataset["train_messages"].reshape(-1)
@@ -181,6 +199,8 @@ def _evaluate_symbol_logistic(
 
 
 def _evaluate_symbol_naive(dataset: dict[str, np.ndarray]) -> dict[str, float]:
+    """Naive symbol classifier that rounds observations to nearest symbols."""
+
     symbols = dataset["symbols"]
     train_pred = _nearest_symbol(dataset["train_observed"], symbols)
     test_pred = _nearest_symbol(dataset["test_observed"], symbols)
@@ -198,6 +218,8 @@ def _plot_symbol_channel_equalization(
     logistic_errors: np.ndarray,
     naive_errors: np.ndarray,
 ) -> Path:
+    """Save the SNR-vs-error comparison plot for the symbol benchmark."""
+
     outdir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     ax.plot(snr_list, naive_errors, "k-.", linewidth=2.5, label="Naive rounding")
@@ -219,6 +241,8 @@ def _plot_symbol_channel_equalization(
 
 
 def _build_reservoir_factory(cfg: DictConfig) -> ReservoirFactory:
+    """Build a zero-argument reservoir factory from Hydra config."""
+
     kind = str(cfg.reservoir.kind)
 
     control_cfg = MeasurementControlConfig(
@@ -233,6 +257,7 @@ def _build_reservoir_factory(cfg: DictConfig) -> ReservoirFactory:
 
     if kind == "channel_map":
         def factory() -> ChannelMapReservoir:
+            # Construct inside the factory so every task run gets a fresh state.
             rcfg = ChannelMapReservoirConfig(
                 n_system=int(cfg.reservoir.n_system),
                 n_ancilla=int(cfg.reservoir.n_ancilla),
@@ -251,6 +276,8 @@ def _build_reservoir_factory(cfg: DictConfig) -> ReservoirFactory:
 
     if kind == "hardware_trajectory":
         def factory() -> HardwareTrajectoryReservoir:
+            # Hardware trajectories are stochastic, so fresh construction also
+            # resets the RNG stream for reproducible benchmark calls.
             rcfg = HardwareTrajectoryReservoirConfig(
                 n_system=int(cfg.reservoir.n_system),
                 n_ancilla=int(cfg.reservoir.n_ancilla),
@@ -270,6 +297,8 @@ def _build_reservoir_factory(cfg: DictConfig) -> ReservoirFactory:
 
 
 def _esn_config(cfg: DictConfig) -> ESNConfig:
+    """Extract ESN baseline config from the shared Hydra tree."""
+
     return ESNConfig(
         n_res=int(cfg.baseline.n_res),
         spectral_radius=float(cfg.baseline.spectral_radius),
@@ -283,6 +312,8 @@ def _esn_config(cfg: DictConfig) -> ESNConfig:
 
 
 def _run_stm(cfg: DictConfig, reservoir_factory: ReservoirFactory) -> tuple[Dict[str, Any], Dict[str, np.ndarray], Dict[str, Any]]:
+    """Run the STM experiment plus ESN baseline and collect artifacts."""
+
     task_cfg = STMConfig(
         T_total=int(cfg.task.T_total),
         washout=int(cfg.task.washout),
@@ -353,6 +384,8 @@ def _run_channel_equalization(
     cfg: DictConfig,
     reservoir_factory: ReservoirFactory,
 ) -> tuple[Dict[str, Any], Dict[str, np.ndarray], Dict[str, Any]]:
+    """Run continuous channel equalization plus ESN baseline."""
+
     task_cfg = ChannelEqualizationConfig(
         T_total=int(cfg.task.T_total),
         washout=int(cfg.task.washout),
@@ -411,6 +444,8 @@ def _run_channel_equalization(
 
 
 def run_experiment_from_cfg(cfg: DictConfig) -> Dict[str, Any]:
+    """Dispatch the configured benchmark task and save artifacts."""
+
     reservoir_factory = _build_reservoir_factory(cfg)
     task_name = str(cfg.task.name)
 
@@ -428,6 +463,8 @@ def run_experiment_from_cfg(cfg: DictConfig) -> Dict[str, Any]:
 
 
 def stm_demo() -> None:
+    """Small non-Hydra STM demo used by the console script."""
+
     cfg = OmegaConf.create(
         {
             "reservoir": {
@@ -480,6 +517,8 @@ def stm_demo() -> None:
 
 
 def run_symbol_channel_equalization_benchmark_from_cfg(cfg: DictConfig) -> Dict[str, Any]:
+    """Run the SNR sweep for symbol-level channel equalization."""
+
     reservoir_params = ReservoirParams(
         n_system=int(cfg.reservoir_params.n_system),
         n_ancilla=int(cfg.reservoir_params.n_ancilla),
@@ -543,6 +582,8 @@ def run_symbol_channel_equalization_benchmark_from_cfg(cfg: DictConfig) -> Dict[
     print("SNR(dB) | QRC test SER | ESN test SER | Logistic test SER | Naive test SER")
     print("-" * 78)
     for snr_db in snr_list:
+        # The same reservoir parameters/readout config are reused across SNRs;
+        # only the generated noisy dataset changes.
         dataset_cfg = ChannelEqualizationDatasetConfig(
             n_train=int(cfg.dataset.n_train),
             n_test=int(cfg.dataset.n_test),

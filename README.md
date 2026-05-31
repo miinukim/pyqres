@@ -1,7 +1,7 @@
 # pyqres
 
 `pyqres` is the unified quantum reservoir computing package for this workspace.
-It brings together the exact/Qiskit reservoir runtime, benchmark tasks,
+It brings together the simulation/Qiskit reservoir runtime, benchmark tasks,
 classical baselines, and PTM/Volterra dimension analysis that were previously
 split across `qrclib` and `qrcdim`.
 
@@ -14,7 +14,7 @@ modules under `src/pyqres`.
 ```text
 pyqres/
   core/         Shared protocols, measurement control, reservoir parameters
-  exact/        Dense exact QRC model and exact reservoir frontends
+  simulation/   Dense QRC simulation models and simulation frontends
   qiskit/       Qiskit-compatible streaming and noisy reservoirs
   dim/          PTM/Liouville, Volterra, rank, visibility analysis
   tasks/        STM, channel equalization, Mackey-Glass benchmarks
@@ -27,7 +27,7 @@ The intended dependency direction is inward:
 
 ```text
 pyqres.core
-  <- pyqres.exact
+  <- pyqres.simulation
   <- pyqres.qiskit
   <- pyqres.dim
   <- pyqres.tasks
@@ -56,7 +56,7 @@ python -m pip install -e ".[all]"
 
 The optional groups are organized by use case:
 
-- `exact` - dense exact simulation dependencies
+- `simulation` - dense simulation dependencies
 - `qiskit` - Qiskit and Qiskit Aer execution
 - `dim` - dimension-analysis dependencies
 - `tasks` - benchmark/task dependencies
@@ -91,21 +91,21 @@ from pyqres.core import (
 Use this layer when adding new reservoir implementations that should be usable
 by tasks or analysis code without binding them to one backend.
 
-## `pyqres.exact`
+## `pyqres.simulation`
 
-`pyqres.exact` contains the dense exact reservoir implementation and exact
-frontends.
+`pyqres.simulation` contains the dense reservoir simulation implementation and
+simulation frontends.
 
 Files:
 
-- `exact/exact_qrc.py` - `ExactQRCModel` and `ExactQRCModelConfig`
-- `exact/channel_map.py` - deterministic channel-map reservoir features
-- `exact/hardware.py` - sampled hardware-trajectory-style reservoir
+- `simulation/exact_qrc.py` - `ExactQRCModel` and `ExactQRCModelConfig`
+- `simulation/channel_map.py` - deterministic channel-map reservoir features
+- `simulation/hardware.py` - sampled hardware-trajectory-style reservoir
 
 Important exports:
 
 ```python
-from pyqres.exact import (
+from pyqres.simulation import (
     ExactQRCModel,
     ExactQRCModelConfig,
     ChannelMapReservoir,
@@ -120,7 +120,7 @@ Typical use:
 ```python
 import numpy as np
 
-from pyqres.exact import ChannelMapReservoir, ChannelMapReservoirConfig
+from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
 
 cfg = ChannelMapReservoirConfig(
     n_system=2,
@@ -134,7 +134,9 @@ features = reservoir.run(np.linspace(-1.0, 1.0, 20))
 ```
 
 Use `ExactQRCModel` directly when you need channel-level access, dense unitaries,
-or PTM-compatible memory-channel operations.
+or PTM-compatible memory-channel operations. The class name still says "Exact"
+because it denotes the exact dense simulation backend inside the broader
+`simulation` package.
 
 ## `pyqres.qiskit`
 
@@ -172,8 +174,8 @@ Files:
 - `dim/model.py` - Ising, Floquet Ising, Haar-random, and SYK reservoir models
 - `dim/analysis.py` - affine PTM expansions and Volterra analyzers
 - `dim/isotropy.py` - compressed visibility projector diagnostics
-- `dim/qrclib_model.py` - wrapper from the exact pyqres core into dim analysis
-- `dim/streaming.py` - task-side streaming adapter over the exact core
+- `dim/qrclib_model.py` - wrapper from the simulation core into dim analysis
+- `dim/streaming.py` - task-side streaming adapter over the simulation core
 - `dim/sweep.py` - configurable sweep machinery
 - `dim/experiment_utils.py` - reusable experiment table/plot helpers
 
@@ -200,11 +202,11 @@ Use this layer for questions like:
 - Which latent directions are invisible to a chosen readout?
 - How isotropic is the readout-visible projector on the latent span?
 
-Example bridge from the exact runtime into dimension analysis:
+Example bridge from the simulation runtime into dimension analysis:
 
 ```python
 from pyqres.dim import QRCLibExactReservoirModel
-from pyqres.exact import ExactQRCModelConfig
+from pyqres.simulation import ExactQRCModelConfig
 
 cfg = ExactQRCModelConfig(n_system=2, n_ancilla=1, seed=1)
 model = QRCLibExactReservoirModel(config=cfg)
@@ -305,10 +307,10 @@ from pyqres.experiments import (
 
 ## Workflow Examples
 
-Run an exact reservoir on a benchmark:
+Run a simulated reservoir on a benchmark:
 
 ```python
-from pyqres.exact import ChannelMapReservoir, ChannelMapReservoirConfig
+from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
 from pyqres.tasks import STMConfig, STMTaskRunner
 
 reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(n_system=2, n_ancilla=1))
@@ -329,7 +331,7 @@ Analyze a reservoir through PTM/Volterra tools:
 
 ```python
 from pyqres.dim import QRCLibExactReservoirModel, IsingVolterraAnalyzer
-from pyqres.exact import ExactQRCModelConfig
+from pyqres.simulation import ExactQRCModelConfig
 
 model = QRCLibExactReservoirModel(
     config=ExactQRCModelConfig(n_system=2, n_ancilla=1, seed=1)
@@ -351,5 +353,5 @@ Compile the package:
 python -m compileall -q src/pyqres
 ```
 
-The smoke tests verify the main public imports and a small exact/dimension
+The smoke tests verify the main public imports and a small simulation/dimension
 bridge path.

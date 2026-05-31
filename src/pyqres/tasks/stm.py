@@ -1,3 +1,5 @@
+"""Short-term memory benchmark task."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Literal, Protocol, Sequence
@@ -7,11 +9,15 @@ from ..utils.linear import ridge_regression_fit, ridge_regression_predict, rmse,
 
 
 class ReservoirProtocol(Protocol):
+    """Reservoir interface required by the STM task runner."""
+
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
         ...
 
 @dataclass
 class STMConfig:
+    """Configuration for the STM benchmark stream and readout split."""
+
     T_total: int = 4000
     washout: int = 500
     train_len: int = 2000
@@ -23,11 +29,15 @@ class STMConfig:
     metric: Literal["r2", "rmse"] = "r2"
 
 class STMTaskRunner:
+    """Generate STM data, collect reservoir features, and score delayed recall."""
+
     def __init__(self, reservoir: ReservoirProtocol, cfg: STMConfig):
         self.res = reservoir
         self.cfg = cfg
 
     def generate_inputs(self) -> np.ndarray:
+        """Generate the scalar input stream used as delayed targets."""
+
         rng = np.random.default_rng(self.cfg.input_seed)
         if self.cfg.input_dist == "uniform_pm1":
             u = rng.choice([-1.0, 1.0], size=self.cfg.T_total)
@@ -36,6 +46,8 @@ class STMTaskRunner:
         return u.astype(float)
 
     def run(self) -> Dict[int, Dict[str, float]]:
+        """Fit one linear readout per delay and return train/test scores."""
+
         cfg = self.cfg
         u = self.generate_inputs()
         X = self.res.run_stream(u.tolist())
@@ -45,6 +57,8 @@ class STMTaskRunner:
 
         out: Dict[int, Dict[str, float]] = {}
         for d in cfg.delays:
+            # The first valid sample for delay d is t=d. Washout may impose a
+            # later start, so choose the stricter boundary.
             t_start = max(t0, d)
             tr = np.arange(t_start, t_train_end)
             te = np.arange(t_train_end, t_test_end)
@@ -63,5 +77,7 @@ class STMTaskRunner:
 
     @staticmethod
     def memory_capacity(results: Dict[int, Dict[str, float]], use_test: bool=True) -> float:
+        """Sum positive delay scores as a standard memory-capacity proxy."""
+
         key = "test_score" if use_test else "train_score"
         return float(sum(max(0.0, v[key]) for v in results.values()))

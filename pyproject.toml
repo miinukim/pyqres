@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pyqres"
 version = "0.1.0"
-description = "Unified quantum reservoir computing package for exact, Qiskit, task, and dimension-analysis workflows"
+description = "Unified quantum reservoir computing package for simulation, Qiskit, task, and dimension-analysis workflows"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-exact = [
+simulation = [
   "scipy>=1.10",
 ]
 qiskit = [

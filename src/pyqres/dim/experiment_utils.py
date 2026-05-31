@@ -40,6 +40,8 @@ _PAULIS = ("X", "Y", "Z")
 
 @dataclass(frozen=True)
 class LineMetricSpec:
+    """Description of one metric line in generated summary plots."""
+
     metric: str
     label: str
     marker: str = "o"
@@ -72,6 +74,8 @@ def _random_pauli_observable_specs(
     *,
     exclude_specs: set[str] | None = None,
 ) -> list[str]:
+    """Sample unique Pauli observable specs from a locality-limited pool."""
+
     count = int(random_cfg.get("count", 0))
     if count < 0:
         raise ValueError(f"Random observable count must be non-negative, got {count}.")
@@ -92,6 +96,8 @@ def _random_pauli_observable_specs(
     excluded = set() if exclude_specs is None else set(exclude_specs)
     pool: list[str] = []
     for word in product(("I", *_PAULIS), repeat=n_memory):
+        # The pool is built from Pauli words and then converted to compact specs
+        # such as `X0*Z2`. Identity-only words are not valid observables here.
         locality = sum(pauli != "I" for pauli in word)
         if locality == 0:
             continue
@@ -112,6 +118,8 @@ def _random_pauli_observable_specs(
 
 
 def _observable_specs_from_cfg(model: Any, observables_cfg: DictConfig) -> list[str]:
+    """Combine preset, custom, and optional random observable specs."""
+
     base_specs = model.default_memory_observable_specs(
         preset=str(observables_cfg.preset),
         custom_specs=list(observables_cfg.custom),
@@ -134,6 +142,8 @@ def _standard_analysis_row(
     observable_specs: Sequence[str],
     result: VolterraResult,
 ) -> dict[str, Any]:
+    """Flatten a successful `VolterraResult` into one CSV-friendly row."""
+
     angles = np.array(result.principal_angles_deg, dtype=float)
     return {
         "status": "ok",
@@ -174,6 +184,8 @@ def _standard_failure_row(
     sweep_value: float,
     exc: Exception,
 ) -> dict[str, Any]:
+    """Create a CSV-friendly row for a failed sweep point."""
+
     return {
         "status": "failed",
         "error": str(exc),
@@ -233,8 +245,10 @@ def run_standard_analysis_sweep(
                 print(
                     f"[{idx}/{total}] {sweep.name}: {sweep.sweep_parameter}={float(sweep_value):.8g} starting",
                     flush=True,
-                )
+            )
             params = sweep.parameters(float(sweep_value))
+            # Build a fresh model for each value because model instances cache
+            # dense unitaries/PTMs keyed by input values.
             model = sweep.build_model(params)
             observable_specs = _observable_specs_from_cfg(model, cfg.experiment.observables)
             observables = [model.parse_memory_observable(spec) for spec in observable_specs]
@@ -287,6 +301,8 @@ def run_standard_analysis_sweep(
                     flush=True,
                 )
         except (MemoryError, NumericalStabilityError, ValueError) as exc:
+            # The experiment table records failed values rather than aborting the
+            # whole sweep, which is useful for scans over unstable regimes.
             row = _standard_failure_row(sweep=sweep, sweep_value=float(sweep_value), exc=exc)
             if failure_row_fn is not None:
                 row.update(dict(failure_row_fn(exc, float(sweep_value))))
@@ -303,7 +319,7 @@ def save_experiment_table(
     *,
     csv_name: str,
 ) -> tuple[Path, Path]:
-    """Save the resolved config and the main CSV table."""
+    """Write the primary CSV and resolved Hydra config for one experiment."""
 
     outdir = Path(cfg.paths.output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -325,7 +341,7 @@ def save_line_metric_plot(
     title: str | None = None,
     figsize: tuple[float, float] = (8.0, 4.5),
 ) -> Path:
-    """Save one lightweight multi-metric line plot."""
+    """Save a simple line plot for selected dataframe metrics."""
 
     fig = plt.figure(figsize=figsize)
     for spec in metrics:

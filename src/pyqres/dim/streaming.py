@@ -1,3 +1,5 @@
+"""Streaming task adapter built on the exact dense QRC core."""
+
 from __future__ import annotations
 
 from itertools import combinations, product
@@ -8,7 +10,7 @@ import numpy as np
 from .pauli import pauli_string
 
 try:
-    from pyqres.exact.exact_qrc import ExactQRCModel, ExactQRCModelConfig, partial_trace_ancilla
+    from pyqres.simulation.exact_qrc import ExactQRCModel, ExactQRCModelConfig, partial_trace_ancilla
 except Exception as exc:  # pragma: no cover
     ExactQRCModel = None  # type: ignore
     ExactQRCModelConfig = None  # type: ignore
@@ -39,7 +41,7 @@ class SharedExactStreamingReservoir:
         custom_observables: Sequence[str] | None = None,
     ):
         if ExactQRCModel is None:
-            raise ImportError("pyqres.exact must be importable to use SharedExactStreamingReservoir.") from _QRCLIB_STREAM_IMPORT_ERROR
+            raise ImportError("pyqres.simulation must be importable to use SharedExactStreamingReservoir.") from _QRCLIB_STREAM_IMPORT_ERROR
         if core is None and config is None:
             raise ValueError("Provide either an ExactQRCModelConfig or an ExactQRCModel instance.")
         self.core = core if core is not None else ExactQRCModel(config)  # type: ignore[arg-type]
@@ -55,6 +57,8 @@ class SharedExactStreamingReservoir:
         self.reset()
 
     def reset(self, rhoS0: np.ndarray | None = None) -> None:
+        """Reset the joint state before processing one stream/message."""
+
         if rhoS0 is None:
             rho_system = self.core.initial_system_density(self.init_state)
         else:
@@ -64,6 +68,8 @@ class SharedExactStreamingReservoir:
         self.rho_joint = np.kron(rho_system, self.core.ancilla_reset_density)
 
     def parse_memory_observable(self, spec: str) -> np.ndarray:
+        """Parse observable specs such as `Z0` or `X0*Z2` on memory qubits."""
+
         cleaned = spec.replace(" ", "")
         if not cleaned:
             raise ValueError("Observable spec must be non-empty")
@@ -93,6 +99,8 @@ class SharedExactStreamingReservoir:
         preset: str = "z",
         custom_specs: Sequence[str] | None = None,
     ) -> List[str]:
+        """Return named observable presets used by task-side readout modes."""
+
         preset_key = preset.lower()
         if preset_key == "z":
             obs_specs = [f"Z{i}" for i in range(self.core.nS)]
@@ -128,6 +136,8 @@ class SharedExactStreamingReservoir:
         return [self.parse_memory_observable(spec) for spec in self.default_memory_observable_specs(preset, custom_specs)]
 
     def _memory_observable_features(self, rho_joint_next: np.ndarray) -> np.ndarray:
+        """Evaluate configured memory observables on the reduced memory state."""
+
         rho_system = partial_trace_ancilla(rho_joint_next, self.core.dim_system, self.core.dim_ancilla)
         # Readout in this mode happens after tracing out the ancilla, so the
         # emitted features are ordinary expectation values on the memory system.
@@ -135,6 +145,8 @@ class SharedExactStreamingReservoir:
         return np.asarray(values, dtype=float)
 
     def _ancilla_features(self, probs: np.ndarray) -> np.ndarray:
+        """Convert ancilla outcome probabilities into the requested feature row."""
+
         probs = np.asarray(probs, dtype=float)
         if self.use_shot_noise:
             if self.readout_mode != "ancilla_probs":
@@ -144,6 +156,8 @@ class SharedExactStreamingReservoir:
         return probs
 
     def step(self, u: float) -> np.ndarray:
+        """Advance one scalar input and emit the configured feature vector."""
+
         evolved = self.core.evolve_joint(self.rho_joint, float(u))
         probs, rho_joint_next = self.core.apply_measurement_protocol_exact(evolved)
         # The post-measurement joint state becomes the next recurrent state.
@@ -163,6 +177,8 @@ class SharedExactStreamingReservoir:
         return np.asarray(feats, dtype=float)
 
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
+        """Run a full input stream and stack one feature row per step."""
+
         x = np.vstack([self.step(float(u)) for u in inputs])
         if not np.isfinite(x).all():
             raise FloatingPointError("Non-finite features from shared exact streaming reservoir.")

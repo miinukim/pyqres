@@ -24,11 +24,15 @@ from .linalg_utils import null_space, orthonormal_basis_from_columns
 
 
 def _encode_complex_matrix(matrix: np.ndarray) -> str:
+    """Serialize a complex matrix as JSON with separate real/imag parts."""
+
     arr = np.asarray(matrix, dtype=complex)
     return json.dumps({"real": np.real(arr).tolist(), "imag": np.imag(arr).tolist()})
 
 
 def _op_norm_hermitian(matrix: np.ndarray) -> float:
+    """Operator norm for a Hermitian matrix, computed from eigenvalues."""
+
     if matrix.size == 0:
         return 0.0
     hermitian = 0.5 * (np.asarray(matrix, dtype=complex) + np.asarray(matrix, dtype=complex).conj().T)
@@ -37,6 +41,8 @@ def _op_norm_hermitian(matrix: np.ndarray) -> float:
 
 
 def _max_offdiag_row_sum(matrix: np.ndarray) -> float:
+    """Return a simple row-sum measure of off-diagonal leakage."""
+
     if matrix.size == 0:
         return 0.0
     arr = np.asarray(matrix, dtype=complex)
@@ -45,6 +51,8 @@ def _max_offdiag_row_sum(matrix: np.ndarray) -> float:
 
 
 def _orth_projector(basis: np.ndarray, ambient_dim: int) -> np.ndarray:
+    """Construct the orthogonal projector onto the span of `basis` columns."""
+
     if basis.size == 0 or basis.shape[1] == 0:
         return np.zeros((ambient_dim, ambient_dim), dtype=complex)
     q = orthonormal_basis_from_columns(np.asarray(basis, dtype=complex))
@@ -52,6 +60,8 @@ def _orth_projector(basis: np.ndarray, ambient_dim: int) -> np.ndarray:
 
 
 def _visibility_angles_deg(sin2_theta: np.ndarray) -> np.ndarray:
+    """Convert sin^2(theta) values into angles in degrees."""
+
     vals = np.asarray(sin2_theta, dtype=float)
     return np.degrees(np.arcsin(np.sqrt(np.clip(vals, 0.0, 1.0)))) if vals.size else np.array([], dtype=float)
 
@@ -64,6 +74,12 @@ def _theta_star_deg(alpha: float) -> float:
 
 @dataclass(frozen=True)
 class CompressedVisibilityDiagnostics:
+    """Structured visibility diagnostics for one latent/readout pair.
+
+    The scalar fields are convenient for CSV tables; the matrix fields are kept
+    for downstream analysis that needs the actual compressed projectors.
+    """
+
     ambient_dim: int
     r_visible: int
     r_eff: int
@@ -103,6 +119,8 @@ class CompressedVisibilityDiagnostics:
         return self.exact_null_fraction
 
     def as_metrics_dict(self, *, encode_matrices: bool = True) -> dict[str, Any]:
+        """Return a flat dict suitable for experiment rows or JSON output."""
+
         b_gamma: Any = _encode_complex_matrix(self.b_gamma) if encode_matrices else self.b_gamma
         b_gamma_plus: Any = _encode_complex_matrix(self.b_gamma_plus) if encode_matrices else self.b_gamma_plus
         zero_sin2 = self.sin2_theta[: self.exact_null_dim]
@@ -184,6 +202,7 @@ def compressed_visibility_diagnostics(
     s_gamma = int(q_gamma.shape[1])
     ambient_dim = int(readout_matrix.shape[1])
     readout_nullspace = null_space(readout_matrix, tol=tol)
+    # Visible directions are the orthogonal complement of the readout nullspace.
     p_null = _orth_projector(readout_nullspace, ambient_dim)
     p_vis = np.eye(ambient_dim, dtype=complex) - p_null
     p_vis = 0.5 * (p_vis + p_vis.conj().T)
@@ -222,6 +241,7 @@ def compressed_visibility_diagnostics(
 
     b_gamma = q_gamma.conj().T @ p_vis @ q_gamma
     b_gamma = 0.5 * (b_gamma + b_gamma.conj().T)
+    # Eigenvalues of B_gamma are sin^2(theta_j), including exact-null directions.
     evals, evecs = la.eigh(b_gamma, check_finite=True)
     evals = np.clip(np.real_if_close(evals), 0.0, 1.0)
     visibility_angles = _visibility_angles_deg(evals)
@@ -234,6 +254,8 @@ def compressed_visibility_diagnostics(
     supported_mask = evals > tol
     supported_dim = int(np.sum(supported_mask))
     exact_null_dim = int(s_gamma - supported_dim)
+    # Removing exact-null directions separates "the readout misses a subspace
+    # entirely" from anisotropy inside the directions it does see.
     if supported_dim == 0:
         empty = np.zeros((0, 0), dtype=complex)
         return CompressedVisibilityDiagnostics(

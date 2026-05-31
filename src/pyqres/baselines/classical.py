@@ -1,3 +1,10 @@
+"""Classical readouts and equalizer baselines.
+
+The functions here are intentionally independent of quantum details. They
+consume dense feature matrices or observed channel sequences and provide simple
+reference models for QRC experiments.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +16,8 @@ from scipy.optimize import minimize
 
 @dataclass
 class LogisticEqualizerConfig:
+    """Hyperparameters for the binary logistic channel equalizer."""
+
     n_lags: int = 8
     l2: float = 1e-4
     max_iter: int = 50
@@ -17,6 +26,8 @@ class LogisticEqualizerConfig:
 
 @dataclass
 class SoftmaxReadoutConfig:
+    """Hyperparameters for multiclass linear/softmax readout training."""
+
     fit_intercept: bool = True
     l2: float = 1e-6
     max_iter: int = 1000
@@ -24,6 +35,8 @@ class SoftmaxReadoutConfig:
 
 
 def _sigmoid(z: np.ndarray) -> np.ndarray:
+    """Numerically stable sigmoid used by Newton logistic regression."""
+
     z = np.asarray(z, dtype=float)
     out = np.empty_like(z)
     pos = z >= 0.0
@@ -34,6 +47,8 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
 
 
 def _lagged_design_matrix(observed: np.ndarray, n_lags: int) -> np.ndarray:
+    """Build `[1, y_t, y_{t-1}, ...]` features for scalar channel observations."""
+
     observed = np.asarray(observed, dtype=float).reshape(-1)
     if n_lags < 1:
         raise ValueError("n_lags must be at least 1.")
@@ -60,6 +75,8 @@ def _prepare_features(X: np.ndarray, fit_intercept: bool) -> np.ndarray:
 
 
 def fit_softmax_readout(X: np.ndarray, y: np.ndarray, cfg: SoftmaxReadoutConfig) -> Dict[str, Any]:
+    """Fit a regularized multiclass linear readout with L-BFGS."""
+
     X = _prepare_features(X, cfg.fit_intercept)
     y = np.asarray(y).reshape(-1)
     if X.shape[0] != y.shape[0]:
@@ -77,15 +94,21 @@ def fit_softmax_readout(X: np.ndarray, y: np.ndarray, cfg: SoftmaxReadoutConfig)
 
     reg_mask = np.ones((n_features, n_classes), dtype=float)
     if cfg.fit_intercept:
+        # Do not penalize the intercept column; this matches the ridge readout
+        # convention used elsewhere in the package.
         reg_mask[0, :] = 0.0
 
     def objective(theta: np.ndarray) -> tuple[float, np.ndarray]:
+        # Work in a flattened parameter vector for SciPy, but reshape into the
+        # natural feature-by-class weight matrix for the math.
         W = theta.reshape(n_features, n_classes)
         with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
             scores = X @ W
         if not np.isfinite(scores).all():
             raise FloatingPointError("Softmax readout scores became non-finite.")
         scores -= np.max(scores, axis=1, keepdims=True)
+        # The max-shift keeps exponentials in range without changing softmax
+        # probabilities.
         with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
             exp_scores = np.exp(scores)
             probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)
@@ -120,6 +143,8 @@ def fit_softmax_readout(X: np.ndarray, y: np.ndarray, cfg: SoftmaxReadoutConfig)
 
 
 def predict_softmax_readout(X: np.ndarray, model: Dict[str, Any]) -> np.ndarray:
+    """Predict class labels using a fitted softmax readout model."""
+
     X = _prepare_features(X, bool(model["fit_intercept"]))
     weights = np.asarray(model["weights"], dtype=float)
     with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
@@ -131,6 +156,8 @@ def predict_softmax_readout(X: np.ndarray, model: Dict[str, Any]) -> np.ndarray:
 
 
 def _fit_logistic_regression(X: np.ndarray, y01: np.ndarray, cfg: LogisticEqualizerConfig) -> np.ndarray:
+    """Fit binary logistic regression by damp-free Newton iterations."""
+
     X = np.asarray(X, dtype=float)
     y01 = np.asarray(y01, dtype=float).reshape(-1)
     if not np.isfinite(X).all() or not np.isfinite(y01).all():
@@ -148,6 +175,8 @@ def _fit_logistic_regression(X: np.ndarray, y01: np.ndarray, cfg: LogisticEquali
         with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
             grad = X.T @ (probs - y01) + reg @ w
         r = probs * (1.0 - probs)
+        # Hessian of the negative log-likelihood plus L2 penalty. The intercept
+        # penalty was zeroed in `reg`, so it stays unregularized.
         with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
             hessian = (X.T * r) @ X + reg
         if not np.isfinite(grad).all() or not np.isfinite(hessian).all():
@@ -172,6 +201,8 @@ def run_channel_equalization_logistic(
     logistic_cfg: LogisticEqualizerConfig,
     metric: Literal["ber", "mse"] = "ber",
 ) -> Dict[str, np.ndarray | float]:
+    """Run a binary logistic baseline on the continuous channel-eq sequence."""
+
     observed = np.asarray(observed, dtype=float).reshape(-1)
     target = np.asarray(target, dtype=float).reshape(-1)
     if observed.shape[0] != target.shape[0]:
@@ -180,6 +211,8 @@ def run_channel_equalization_logistic(
         raise ValueError("metric must be 'ber' or 'mse'.")
 
     X = _lagged_design_matrix(observed, logistic_cfg.n_lags)
+    # Start after both the user-requested washout and enough samples to fill the
+    # lagged design matrix.
     t0 = int(max(washout, logistic_cfg.n_lags - 1))
     t_train_end = t0 + int(train_len)
     t_test_end = t_train_end + int(test_len)
@@ -229,6 +262,8 @@ def run_channel_equalization_symbol_logistic(
     readout_cfg: SoftmaxReadoutConfig,
     n_lags: int = 1,
 ) -> Dict[str, Any]:
+    """Run a multiclass symbol-level logistic/softmax equalizer."""
+
     X_train = _message_lagged_design(train_observed, n_lags)[:, :, 1:].reshape(-1, n_lags)
     X_test = _message_lagged_design(test_observed, n_lags)[:, :, 1:].reshape(-1, n_lags)
     y_train = np.asarray(train_messages).reshape(-1)

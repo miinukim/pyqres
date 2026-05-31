@@ -1,3 +1,5 @@
+"""Echo-state network baselines for QRC benchmarks."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Literal, Sequence
@@ -6,6 +8,8 @@ from ..utils.linear import ridge_regression_fit, ridge_regression_predict, rmse,
 
 @dataclass
 class ESNConfig:
+    """Hyperparameters for the lightweight ESN baseline."""
+
     n_res: int = 200
     spectral_radius: float = 0.9
     input_scale: float = 0.5
@@ -69,6 +73,8 @@ def _spectral_radius_power_iter(A: np.ndarray, seed: int, n_iter: int = 200) -> 
 
 
 class EchoStateNetwork:
+    """Minimal leaky ESN with a linear readout trained outside the class."""
+
     def __init__(self, cfg: ESNConfig):
         self.cfg = cfg
         if not (0.0 <= cfg.leak_rate <= 1.0):
@@ -82,6 +88,8 @@ class EchoStateNetwork:
         W = rng.normal(0.0, 1.0, size=(n, n)).astype(np.float64)
 
         # Gershgorin / infinity-norm bound (safe upper bound)
+        # This is cheaper and more robust than exact eigenvalue scaling for the
+        # small baseline role the ESN plays here.
         row_sum = np.sum(np.abs(W), axis=1)
         rho_bound = float(np.max(row_sum))
 
@@ -97,6 +105,8 @@ class EchoStateNetwork:
         self.x = np.zeros(n, dtype=np.float64)
 
     def step(self, u: float) -> np.ndarray:
+        """Advance the ESN by one scalar input and return a copy of the state."""
+
         cfg = self.cfg
         inp = np.array([1.0, u], dtype=np.float64)
         # Some BLAS backends can raise spurious divide/underflow flags in matmul when
@@ -109,6 +119,8 @@ class EchoStateNetwork:
             raise FloatingPointError("ESN pre-activation became non-finite. Reduce spectral_radius/input_scale.")
 
         x_new = np.tanh(pre)
+        # Leaky integration interpolates between previous state and nonlinear
+        # candidate state. leak_rate=1 gives the standard ESN update.
         self.x = (1.0 - cfg.leak_rate) * self.x + cfg.leak_rate * x_new
 
         # clip as safety valve
@@ -120,6 +132,8 @@ class EchoStateNetwork:
         return self.x.copy()
 
     def collect_states(self, u_seq: Sequence[float]) -> np.ndarray:
+        """Run an input sequence and return bias-augmented state features."""
+
         X = []
         for u in u_seq:
             X.append(self.step(float(u)))
@@ -132,6 +146,8 @@ class EchoStateNetwork:
 def run_stm_esn(T_total: int, washout: int, train_len: int, test_len: int, delays: Sequence[int],
                 input_dist: Literal["uniform_pm1","gaussian"], input_seed: int,
                 esn_cfg: ESNConfig, metric: Literal["r2","rmse"]="r2") -> Dict[int, Dict[str, float]]:
+    """Evaluate the ESN on the short-term memory benchmark."""
+
     rng = np.random.default_rng(input_seed)
     if input_dist == "uniform_pm1":
         u = rng.choice([-1.0, 1.0], size=T_total).astype(float)
@@ -144,6 +160,7 @@ def run_stm_esn(T_total: int, washout: int, train_len: int, test_len: int, delay
     t_test_end = t_train_end + test_len
     out: Dict[int, Dict[str, float]] = {}
     for d in delays:
+        # For delay d, the target at time t is the input observed at t-d.
         t_start = max(t0, d)
         tr = np.arange(t_start, t_train_end)
         te = np.arange(t_train_end, t_test_end)
@@ -171,6 +188,8 @@ def run_channel_equalization_esn(
     ridge_l2: float = 1e-6,
     metric: Literal["ber", "mse"] = "ber",
 ) -> Dict[str, float]:
+    """Evaluate the ESN on binary channel equalization."""
+
     observed = np.asarray(observed, dtype=float).reshape(-1)
     target = np.asarray(target, dtype=float).reshape(-1)
     if observed.shape[0] != target.shape[0]:

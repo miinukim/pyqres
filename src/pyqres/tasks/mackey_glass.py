@@ -1,3 +1,5 @@
+"""Mackey-Glass time-series forecasting benchmark."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,12 +11,16 @@ from ..utils.linear import ridge_regression_fit, ridge_regression_predict, rmse,
 
 
 class ReservoirProtocol(Protocol):
+    """Reservoir interface required by the Mackey-Glass task runner."""
+
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
         ...
 
 
 @dataclass
 class MackeyGlassConfig:
+    """Configuration for Mackey-Glass generation and readout scoring."""
+
     T_total: int = 1200
     washout: int = 200
     train_len: int = 600
@@ -33,6 +39,8 @@ class MackeyGlassConfig:
 
 
 def generate_mackey_glass_series(cfg: MackeyGlassConfig) -> np.ndarray:
+    """Generate a scalar Mackey-Glass sequence by Euler integration."""
+
     horizon = int(cfg.prediction_horizon)
     if horizon < 1:
         raise ValueError(f"prediction_horizon must be >= 1, got {horizon}.")
@@ -46,6 +54,7 @@ def generate_mackey_glass_series(cfg: MackeyGlassConfig) -> np.ndarray:
     series[: delay_steps + 1] = history
 
     for t in range(delay_steps, total_steps + delay_steps):
+        # Discrete Euler update for dx/dt = beta*x_tau/(1+x_tau^p)-gamma*x.
         x_t = series[t]
         x_tau = series[t - delay_steps]
         dx = cfg.beta * x_tau / (1.0 + x_tau ** cfg.power) - cfg.gamma * x_t
@@ -56,11 +65,15 @@ def generate_mackey_glass_series(cfg: MackeyGlassConfig) -> np.ndarray:
 
 
 class MackeyGlassTaskRunner:
+    """Forecast future Mackey-Glass values from reservoir features."""
+
     def __init__(self, reservoir: ReservoirProtocol, cfg: MackeyGlassConfig):
         self.res = reservoir
         self.cfg = cfg
 
     def generate_io(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return aligned input and prediction-horizon target sequences."""
+
         series = generate_mackey_glass_series(self.cfg)
         horizon = int(self.cfg.prediction_horizon)
         inputs = series[:-horizon]
@@ -68,6 +81,8 @@ class MackeyGlassTaskRunner:
         return inputs.astype(float), targets.astype(float)
 
     def run(self) -> Dict[str, float]:
+        """Fit a ridge readout and report train/test forecasting scores."""
+
         cfg = self.cfg
         u, target = self.generate_io()
         X = self.res.run_stream(u.tolist())

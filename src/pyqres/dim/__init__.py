@@ -1,3 +1,5 @@
+"""Public API for PTM, Volterra, visibility, and sweep-analysis tools."""
+
 from .analysis import (
     IsingVolterraAnalyzer,
     PTMAffineExpansion,

@@ -1,3 +1,5 @@
+"""Adapter from the exact dense QRC core into the dimension-analysis interface."""
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -8,7 +10,7 @@ from .linalg_utils import ensure_finite
 from .model import ReservoirBase
 
 try:
-    from pyqres.exact.exact_qrc import ExactQRCModel, ExactQRCModelConfig
+    from pyqres.simulation.exact_qrc import ExactQRCModel, ExactQRCModelConfig
 except Exception as exc:  # pragma: no cover
     ExactQRCModel = None  # type: ignore
     ExactQRCModelConfig = None  # type: ignore
@@ -22,11 +24,14 @@ class QRCLibExactReservoirModel(ReservoirBase):
 
     def __init__(self, config: "ExactQRCModelConfig | None" = None, core: "ExactQRCModel | None" = None):
         if ExactQRCModel is None:
-            raise ImportError("pyqres.exact must be importable to use QRCLibExactReservoirModel.") from _QRCLIB_IMPORT_ERROR
+            raise ImportError("pyqres.simulation must be importable to use QRCLibExactReservoirModel.") from _QRCLIB_IMPORT_ERROR
         if core is None and config is None:
             raise ValueError("Provide either a pyqres ExactQRCModelConfig or an ExactQRCModel instance.")
         self.core = core if core is not None else ExactQRCModel(config)  # type: ignore[arg-type]
         if self.core.control.post_measurement_mode != "reset":
+            # A reset channel maps memory operators to memory operators. Without
+            # reset, the effective state lives on the joint system and the PTM
+            # assumptions in `pyqres.dim` do not apply.
             raise ValueError("pyqres PTM analysis requires post_measurement_mode='reset'.")
         self.params = self.core.cfg
         self._initialize_common(self.core.nS, self.core.nA, reset_to_zero_state=True)
@@ -43,6 +48,9 @@ class QRCLibExactReservoirModel(ReservoirBase):
         cached = self._cache_get(self._ptm_cache, u)
         if cached is not None:
             return cached
+        # The exact core already exposes the reduced memory channel. PTM
+        # construction here just applies that channel to every Pauli basis
+        # operator and projects the outputs back onto the same basis.
         # The pyqres exact core already exposes the reduced system channel, so PTM
         # construction here is just "apply channel to each basis operator, then project".
         outputs = np.stack([self.channel(u, basis_op) for basis_op in self.memory_basis], axis=0)

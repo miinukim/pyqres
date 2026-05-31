@@ -1,3 +1,5 @@
+"""Nonlinear channel equalization benchmark tasks."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,12 +11,16 @@ from ..utils.linear import ridge_regression_fit, ridge_regression_predict
 
 
 class ReservoirProtocol(Protocol):
+    """Reservoir interface required by the continuous channel-eq task."""
+
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
         ...
 
 
 @dataclass
 class ChannelEqualizationConfig:
+    """Configuration for the continuous binary channel-equalization sequence."""
+
     T_total: int = 3000
     washout: int = 200
     train_len: int = 1800
@@ -33,6 +39,8 @@ class ChannelEqualizationConfig:
 
 @dataclass
 class ChannelEqualizationDatasetConfig:
+    """Configuration for explicit train/test symbol-level channel datasets."""
+
     n_train: int = 100
     n_test: int = 100
     n_symb: int = 100
@@ -45,6 +53,8 @@ class ChannelEqualizationDatasetConfig:
 
 
 def _channel_response(message: np.ndarray, cfg: ChannelEqualizationDatasetConfig) -> tuple[np.ndarray, float]:
+    """Apply the nonlinear channel without adding random noise."""
+
     message = np.asarray(message, dtype=float).reshape(-1)
     n_taps = len(cfg.taps)
     padded = np.concatenate((message[-n_taps:], message))
@@ -54,9 +64,13 @@ def _channel_response(message: np.ndarray, cfg: ChannelEqualizationDatasetConfig
 
 
 def generate_channel_equalization_dataset(cfg: ChannelEqualizationDatasetConfig) -> Dict[str, np.ndarray]:
+    """Generate independent train/test message matrices and noisy observations."""
+
     rng = np.random.default_rng(cfg.input_seed)
 
     def sample_split(n_messages: int) -> tuple[np.ndarray, np.ndarray]:
+        # Each row is a full message. Noise is added after the deterministic
+        # nonlinear channel response so the symbol labels remain known exactly.
         messages = rng.choice(np.asarray(cfg.symbols, dtype=float), size=(n_messages, cfg.n_symb)).astype(float)
         observed = np.zeros_like(messages)
         for idx in range(n_messages):
@@ -76,6 +90,8 @@ def generate_channel_equalization_dataset(cfg: ChannelEqualizationDatasetConfig)
 
 
 def generate_channel_equalization_data(cfg: ChannelEqualizationConfig) -> Tuple[np.ndarray, np.ndarray]:
+    """Generate the classic continuous binary channel-eq input/target pair."""
+
     rng = np.random.default_rng(cfg.input_seed)
     s = rng.choice([-1.0, 1.0], size=cfg.T_total).astype(float)
     maxlag = max(0, len(cfg.taps) - 1)
@@ -100,6 +116,8 @@ def generate_channel_equalization_data(cfg: ChannelEqualizationConfig) -> Tuple[
 
 
 class ChannelEqualizationTaskRunner:
+    """Collect reservoir features and fit a linear equalizer readout."""
+
     def __init__(self, reservoir: ReservoirProtocol, cfg: ChannelEqualizationConfig):
         self.res = reservoir
         self.cfg = cfg
@@ -108,6 +126,8 @@ class ChannelEqualizationTaskRunner:
         return generate_channel_equalization_data(self.cfg)
 
     def run(self) -> Dict[str, float]:
+        """Run the full continuous channel-eq benchmark."""
+
         cfg = self.cfg
         u, target = self.generate_io()
         X = self.res.run_stream(u.tolist())
@@ -141,6 +161,8 @@ class ChannelEqualizationTaskRunner:
 
 
 class ChannelEqualizationReservoirProtocol(Protocol):
+    """Reservoir interface required by the symbol-dataset feature collector."""
+
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
         ...
 
@@ -153,6 +175,12 @@ def collect_channel_equalization_reservoir_features(
     observed_messages: np.ndarray,
     initial_state: np.ndarray | None = None,
 ) -> np.ndarray:
+    """Run the reservoir separately on each observed message.
+
+    Resetting between messages avoids leaking state from one independent sample
+    into the next, which is important for symbol-level train/test datasets.
+    """
+
     observed_messages = np.asarray(observed_messages, dtype=float)
     features = []
     for message in observed_messages:

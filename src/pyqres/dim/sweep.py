@@ -272,6 +272,8 @@ class SweepExperiment:
         return pd.DataFrame(rows)
 
     def save(self, df: pd.DataFrame, outdir: str | Path, stem: str = "ising_volterra_sweep") -> Path:
+        """Persist a completed sweep table and quick-look diagnostic plots."""
+
         # Persist both the raw table and a couple of quick-look diagnostic plots.
         outdir = Path(outdir)
         outdir.mkdir(parents=True, exist_ok=True)

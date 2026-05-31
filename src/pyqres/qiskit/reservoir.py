@@ -1,3 +1,5 @@
+"""Qiskit circuit implementation of a streaming quantum reservoir."""
+
 from __future__ import annotations
 from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
@@ -13,6 +15,14 @@ except Exception:  # pragma: no cover
     NoiseModel = None  # type: ignore
 
 class QRCReservoir:
+    """Build and execute streaming reservoir circuits.
+
+    The circuit repeats the same high-level pattern for each scalar input:
+    encode input, apply reservoir dynamics, optionally entangle/measure/reset
+    ancillas, then measure the system readout. Feature extraction happens from
+    the final counts dictionary after Aer execution.
+    """
+
     def __init__(self, cfg: QRCConfig):
         if QuantumCircuit is None:
             raise ImportError("qiskit is required (pip install qiskit qiskit-aer).")
@@ -21,6 +31,8 @@ class QRCReservoir:
         self._init_disorder()
 
     def _init_disorder(self) -> None:
+        """Initialize reproducible random fields, couplings, and input signs."""
+
         cfg = self.cfg
         n = cfg.total_qubits()
         rs = np.random.RandomState(cfg.seed)
@@ -31,6 +43,8 @@ class QRCReservoir:
         self.input_sign = rs.choice([-1.0, 1.0], size=n)
 
     def _apply_encoding(self, qc: "QuantumCircuit", uval: float) -> None:
+        """Append the configured scalar-input encoding to an existing circuit."""
+
         cfg = self.cfg
         n = cfg.total_qubits()
         s = cfg.input_scale
@@ -50,6 +64,8 @@ class QRCReservoir:
             raise ValueError(f"Unknown encoding: {cfg.encoding}")
 
     def _apply_reservoir_unitary(self, qc: "QuantumCircuit") -> None:
+        """Append one reservoir-evolution block using the configured ansatz."""
+
         cfg = self.cfg
         n = cfg.total_qubits()
         if cfg.reservoir_type == "ising_like":
@@ -65,6 +81,8 @@ class QRCReservoir:
                             qc.rzz(2.0 * a, i, j)
         elif cfg.reservoir_type == "random_cx_rz":
             for _ in range(cfg.depth_per_step):
+                # Shuffle pairings at each layer so the random-CX reservoir does
+                # not repeatedly couple the same neighboring indices.
                 perm = np.arange(n); self.rng.shuffle(perm)
                 pairs = [(perm[k], perm[k+1]) for k in range(0, n-1, 2)]
                 for a, b in pairs:
@@ -75,6 +93,8 @@ class QRCReservoir:
             raise ValueError(f"Unknown reservoir_type: {cfg.reservoir_type}")
 
     def _apply_purification_entangle(self, qc: "QuantumCircuit") -> None:
+        """Entangle system and ancilla qubits before ancilla measurement."""
+
         cfg = self.cfg
         nS, nA = cfg.n_system, cfg.n_ancilla
         if not cfg.use_purification or nA <= 0:
@@ -90,6 +110,13 @@ class QRCReservoir:
             raise ValueError(f"Unknown ancilla_pattern: {cfg.ancilla_pattern}")
 
     def build_streaming_circuit(self, inputs: Sequence[float], measure_system: bool = True) -> Tuple["QuantumCircuit", List[int], List[int]]:
+        """Build the full multi-time-step circuit and record bit allocation.
+
+        The returned `sys_bits_per_step` and `anc_bits_per_step` arrays are used
+        by `features_from_counts` to decode the flat classical register into one
+        feature vector per time step.
+        """
+
         cfg = self.cfg
         nS, nA = cfg.n_system, cfg.n_ancilla
         n = cfg.total_qubits()
@@ -121,6 +148,8 @@ class QRCReservoir:
 
     @classmethod
     def _z_expectation_from_counts(cls, counts: Dict[str, int], shots: int, clbit_index: int) -> float:
+        """Estimate a single Z expectation value from a counts dictionary."""
+
         acc = 0.0
         for s, c in counts.items():
             b = cls._bit_at_from_right(s, clbit_index)
@@ -135,6 +164,8 @@ class QRCReservoir:
         return z
 
     def features_from_counts(self, counts: Dict[str, int], sys_bits_per_step: List[int], anc_bits_per_step: List[int]) -> np.ndarray:
+        """Convert flat Qiskit counts into a dense feature matrix."""
+
         cfg = self.cfg
         T = len(sys_bits_per_step)
         feats = []
@@ -159,6 +190,8 @@ class QRCReservoir:
 
     def run_stream(self, inputs: Sequence[float], backend: Optional["AerSimulator"]=None,
                    noise_model: Optional["NoiseModel"]=None, seed_simulator: int = 123) -> np.ndarray:
+        """Execute a streaming circuit and return time-indexed readout features."""
+
         cfg = self.cfg
         qc, sys_bits, anc_bits = self.build_streaming_circuit(inputs, measure_system=True)
         if backend is None:
