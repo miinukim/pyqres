@@ -72,7 +72,7 @@ Files:
 
 - `core/protocols.py` - minimal reservoir protocols and result containers
 - `core/control.py` - measurement, reset, weak-measurement, and feedback helpers
-- `core/reservoir_params.py` - Hamiltonian parameter and coupling generators
+- `core/reservoir_params.py` - Hamiltonian presets, Pauli-term builders, and coupling generators
 
 Important exports:
 
@@ -83,13 +83,57 @@ from pyqres.core import (
     CircuitReservoirProtocol,
     ReservoirStepResult,
     ReservoirRunResult,
+    HamiltonianSpec,
     MeasurementControlConfig,
+    PauliTerm,
     ReservoirParams,
 )
 ```
 
 Use this layer when adding new reservoir implementations that should be usable
 by tasks or analysis code without binding them to one backend.
+
+`ReservoirParams` supports the built-in Ising-type preset as well as broader
+Hamiltonian specifications. Matrix-like inputs can be NumPy arrays, SciPy
+sparse matrices, or Qiskit quantum-info operators such as `SparsePauliOp` and
+`Operator`. Pauli Hamiltonians are carried as backend-neutral `HamiltonianSpec`
+objects so Qiskit/Aer backends can consume `SparsePauliOp` while the dense
+simulation backend only materializes NumPy matrices at its boundary.
+
+```python
+from pyqres.core import PauliTerm, ReservoirParams
+from pyqres.simulation import ExactQRCModel, ExactQRCModelConfig
+
+# Built-in Ising-type preset.
+ising_kwargs = ReservoirParams.ising_type(
+    n_system=2,
+    n_ancilla=1,
+    graph_kind="full",
+).generate()
+# With the qiskit extra installed, this stays symbolic for Qiskit/Aer routing.
+qiskit_ready_h0 = ising_kwargs["H0_hamiltonian"].to_sparse_pauli_op()
+ising_model = ExactQRCModel(ExactQRCModelConfig(**ising_kwargs))
+
+# Arbitrary Pauli-term Hamiltonian H(u) = H0 + u H1.
+term_kwargs = ReservoirParams.from_pauli_terms(
+    n_system=1,
+    n_ancilla=1,
+    h0_terms=[PauliTerm(1.0, ((0, "X"),))],
+    h1_terms=[PauliTerm(0.5, ((1, "Z"),))],
+).generate()
+# The dense simulator will convert this at its boundary; Qiskit can use it first.
+term_sparse_op = term_kwargs["H0_hamiltonian"].to_sparse_pauli_op()
+term_model = ExactQRCModel(ExactQRCModelConfig(**term_kwargs))
+
+# Arbitrary matrix-like Hamiltonians are also accepted.
+matrix_kwargs = ReservoirParams.from_matrices(
+    n_system=1,
+    n_ancilla=1,
+    h0_matrix=term_model.H0,
+    h1_matrix=term_model.H1,
+).generate()
+matrix_model = ExactQRCModel(ExactQRCModelConfig(**matrix_kwargs))
+```
 
 ## `pyqres.simulation`
 
@@ -150,6 +194,7 @@ Files:
 Important exports:
 
 ```python
+from pyqres.core import ReservoirParams
 from pyqres.qiskit import (
     QRCConfig,
     QRCReservoir,
@@ -157,11 +202,30 @@ from pyqres.qiskit import (
     NISQReservoir,
     NoiseConfig,
 )
+
+params = ReservoirParams.ising_type(n_system=2, n_ancilla=1).generate()
+cfg = QRCConfig(
+    n_system=2,
+    n_ancilla=1,
+    reservoir_type="pauli_evolution",
+    H0_hamiltonian=params["H0_hamiltonian"],
+    H1_hamiltonian=params["H1_hamiltonian"],
+    evolution_synthesis="lie_trotter",
+    evolution_reps=1,
+)
+reservoir = QRCReservoir(cfg)
+circuit = reservoir.build_streaming_circuit([0.1], measure_system=False)[0]
+
+# Pass an IBM/Qiskit backend to map the circuit to that backend's target ISA.
+backend = None  # replace with service.backend("ibm_backend_name")
+executable = reservoir.build_executable_circuit([0.1], backend=backend)
 ```
 
 This layer is for circuit-style reservoir execution, Aer simulation, and noisy
-NISQ-style experiments. It should remain backend-oriented and should not import
-dimension-analysis code.
+NISQ-style experiments. `pauli_evolution` uses Qiskit's `PauliEvolutionGate`
+with configurable product-formula synthesis. That gate is a high-level
+instruction for `exp(-iHt)`; `build_executable_circuit` decomposes/transpiles it
+into basis gates for a concrete backend.
 
 ## `pyqres.dim`
 

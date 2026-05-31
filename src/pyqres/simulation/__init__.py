@@ -5,7 +5,7 @@ classes retain "Exact" in their names to distinguish exact dense simulation from
 finite-shot trajectory or Qiskit execution.
 """
 
-from pyqres.core import MeasurementControlConfig, ReservoirParams
+from pyqres.core import HamiltonianSpec, MeasurementControlConfig, PauliTerm, ReservoirParams
 
 from .channel_map import ChannelMapReservoir, ChannelMapReservoirConfig
 from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
@@ -18,6 +18,8 @@ __all__ = [
     "ExactQRCModelConfig",
     "HardwareTrajectoryReservoir",
     "HardwareTrajectoryReservoirConfig",
+    "HamiltonianSpec",
     "MeasurementControlConfig",
+    "PauliTerm",
     "ReservoirParams",
 ]

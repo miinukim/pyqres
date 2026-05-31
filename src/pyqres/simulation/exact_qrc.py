@@ -22,7 +22,7 @@ from pyqres.core.control import (
     single_qubit_gate,
     weak_measurement_kraus,
 )
-from pyqres.core.reservoir_params import ReservoirParams
+from pyqres.core.reservoir_params import ReservoirParams, dense_hamiltonian_matrix
 
 
 PAULI_1Q = {
@@ -185,6 +185,7 @@ class ExactQRCModelConfig:
     n_system: int = 4
     n_ancilla: int = 2
     tau: float = 1.0
+    hamiltonian_kind: str = "ising"
     input_encoding: Literal["hamiltonian", "amplitude", "unitary"] = "hamiltonian"
     input_scale: float = 1.0
     input_bias: float = 0.0
@@ -195,6 +196,10 @@ class ExactQRCModelConfig:
     input_unitary_factory: Optional[Callable[[float], Any]] = None
     input_unitary_order: Literal["before", "after", "replace"] = "before"
     unitary_cache_size: Optional[int] = 128
+    H0_hamiltonian: Optional[Any] = None
+    H1_hamiltonian: Optional[Any] = None
+    H0_matrix: Optional[Any] = None
+    H1_matrix: Optional[Any] = None
     hx0_vec: Optional[np.ndarray] = None
     hz1_vec: Optional[np.ndarray] = None
     J_mat: Optional[np.ndarray] = None
@@ -229,7 +234,23 @@ class ExactQRCModel:
         self.dim_total = 2**self.n
         self.control = cfg.control.validated(self.nS, self.nA)
 
-        if cfg.hx0_vec is None or cfg.hz1_vec is None or cfg.J_mat is None:
+        if (
+            cfg.H0_hamiltonian is not None
+            or cfg.H1_hamiltonian is not None
+            or cfg.H0_matrix is not None
+            or cfg.H1_matrix is not None
+        ):
+            # Generic Hamiltonian mode: callers provide matrix-like Hamiltonians,
+            # usually from ReservoirParams.from_matrices/from_pauli_terms.
+            self.hx0 = None
+            self.hz1 = None
+            self.J = None
+            self.tau = float(cfg.tau)
+            h0_like = cfg.H0_hamiltonian if cfg.H0_hamiltonian is not None else cfg.H0_matrix
+            h1_like = cfg.H1_hamiltonian if cfg.H1_hamiltonian is not None else cfg.H1_matrix
+            self.H0 = self._validate_hamiltonian_matrix("H0_hamiltonian", h0_like)
+            self.H1 = self._validate_hamiltonian_matrix("H1_hamiltonian", h1_like)
+        elif cfg.hx0_vec is None or cfg.hz1_vec is None or cfg.J_mat is None:
             # If explicit Hamiltonian parameters are absent, derive a
             # reproducible random reservoir from the compact ReservoirParams
             # generator. Explicit arrays always take precedence.
@@ -244,17 +265,18 @@ class ExactQRCModel:
             self.hz1 = np.asarray(generated["hz1_vec"], dtype=float)
             self.J = np.asarray(generated["J_mat"], dtype=float)
             self.tau = float(generated["tau"])
+            self.H0, self.H1 = self._build_h0_h1()
         else:
             self.hx0 = np.asarray(cfg.hx0_vec, dtype=float)
             self.hz1 = np.asarray(cfg.hz1_vec, dtype=float)
             self.J = np.asarray(cfg.J_mat, dtype=float)
             self.tau = float(cfg.tau)
+            self.H0, self.H1 = self._build_h0_h1()
 
         self.ancilla_reset_density = computational_zero_density(self.nA)
         self._unitary_cache: OrderedDict[float, np.ndarray] = OrderedDict()
         self._measurement_kraus = self._build_measurement_kraus()
         self._identity_system = np.eye(self.dim_system, dtype=complex)
-        self.H0, self.H1 = self._build_h0_h1()
         self._fixed_dynamics_unitary = expm(-1j * self.tau * self.H0)
 
     def clear_caches(self) -> None:
@@ -275,6 +297,19 @@ class ExactQRCModel:
                 return
             while len(self._unitary_cache) > max_entries:
                 self._unitary_cache.popitem(last=False)
+
+    def _validate_hamiltonian_matrix(self, name: str, matrix: Any | None) -> np.ndarray:
+        """Validate a user-supplied dense Hamiltonian component."""
+
+        if matrix is None:
+            return np.zeros((self.dim_total, self.dim_total), dtype=complex)
+        out = dense_hamiltonian_matrix(matrix)
+        expected = (self.dim_total, self.dim_total)
+        if out.shape != expected:
+            raise ValueError(f"{name} must have shape {expected}, got {out.shape}.")
+        if not np.allclose(out, out.conj().T, atol=1e-10):
+            raise ValueError(f"{name} must be Hermitian.")
+        return 0.5 * (out + out.conj().T)
 
     def _build_h0_h1(self) -> tuple[np.ndarray, np.ndarray]:
         """Build fixed and input-modulated Hamiltonian components.

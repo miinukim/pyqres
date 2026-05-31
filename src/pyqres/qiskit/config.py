@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 import numpy as np
 
 from pyqres.core.control import MeasurementControlConfig
@@ -16,7 +16,8 @@ except Exception:  # pragma: no cover
     depolarizing_error = None  # type: ignore
 
 EncodingType = Literal["rz_global", "rz_per_qubit", "hamiltonian_trotter"]
-ReservoirType = Literal["ising_like", "random_cx_rz"]
+ReservoirType = Literal["ising_like", "random_cx_rz", "pauli_evolution"]
+EvolutionSynthesisType = Literal["default", "lie_trotter", "suzuki_trotter"]
 ReadoutType = Literal["z_local", "z_local_plus_anc", "pauli_k_local"]
 
 @dataclass
@@ -79,6 +80,13 @@ class QRCConfig:
     n_system: int = 4
     n_ancilla: int = 2
     reservoir_type: ReservoirType = "ising_like"
+    H0_hamiltonian: Optional[Any] = None
+    H1_hamiltonian: Optional[Any] = None
+    evolution_synthesis: EvolutionSynthesisType = "lie_trotter"
+    evolution_reps: int = 1
+    evolution_order: int = 2
+    evolution_insert_barriers: bool = False
+    evolution_preserve_order: bool = True
     depth_per_step: int = 1
     tau: float = 1.0
     seed: int = 1234
@@ -93,6 +101,7 @@ class QRCConfig:
     include_bias: bool = True
     shots: int = 2048
     simulator_method: Literal["automatic", "density_matrix", "statevector"] = "density_matrix"
+    transpile_optimization_level: int = 1
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     control: MeasurementControlConfig = field(default_factory=MeasurementControlConfig)
 
