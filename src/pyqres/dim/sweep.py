@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from .analysis import IsingVolterraAnalyzer
+from .analysis import VolterraAnalyzer
 from .linalg_utils import NumericalStabilityError
 from .model import (
     FloquetIsingReservoirParameters,
@@ -227,7 +227,7 @@ class SweepExperiment:
                 # The sweep layer stays intentionally thin: it chooses the model
                 # and observable family, then delegates all structural work to
                 # the analyzer so experiment scripts remain declarative.
-                analyzer = IsingVolterraAnalyzer(
+                analyzer = VolterraAnalyzer(
                     model,
                     observables=observables,
                     max_order=self.max_order,

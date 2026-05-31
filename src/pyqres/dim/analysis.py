@@ -2,15 +2,10 @@ from __future__ import annotations
 
 """Volterra analysis pipelines.
 
-This module contains both:
-
-1. the original dense PTM-to-Volterra pipeline
-2. an exact reduced observable-side pipeline based on ``(P, L)``-truncated reduced sector
-
-The dense path remains useful for small systems and regression checks. The
-reduced path avoids explicit dense PTM construction by generating only the
-observable-relevant operator sector under admissible zero-input drift and
-input-insertion words.
+This module contains the main observable-side Volterra analyzer plus a dense
+PTM-based analyzer for small-system validation. The main analyzer avoids
+explicit dense PTM construction by generating only the observable-relevant
+operator sector under admissible zero-input drift and input-insertion words.
 """
 
 from dataclasses import dataclass
@@ -35,9 +30,9 @@ FeatureLabel = Tuple[int, ...]
 # Example convention used in comments below:
 # - ``n_memory = 2`` so the traceless PTM sector has dimension ``4^2 - 1 = 15``
 # - ``observables = [Z0, Z1]`` so visible matrices have ``J = 2`` rows
-# - ``P = 2``, ``L = 1`` for the reduced/dense truncation examples
+# - ``P = 2``, ``L = 1`` for the observable-side/dense truncation examples
 # - dense labels look like ``(1, 0)`` or ``(2, 0)`` in the polynomial-history basis
-# - reduced labels look like ``(2, 0, 1)`` meaning:
+# - observable-side labels look like ``(2, 0, 1)`` meaning:
 #   seed observable 2 -> one drift step -> one first-order insertion
 
 
@@ -79,11 +74,11 @@ class VolterraResult:
 
     # ``monomials`` is used generically for both analysis paths:
     # - dense PTM path: polynomial-history labels for the truncated Volterra family
-    # - reduced path: one admissible reduced-sector word per retained basis vector
+    # - observable-side path: one admissible operator word per retained basis vector
     monomials: List[FeatureLabel]
     # ``latent_kernel_matrix`` is the raw spanning family before orthonormalization.
     # Its columns are PTM traceless coordinates in the dense path and flattened
-    # operator columns in the reduced observable-side path.
+    # operator columns in the observable-side path.
     latent_kernel_matrix: np.ndarray
     # ``latent_basis_matrix`` is an orthonormal basis for the span used by
     # restricted readout and principal-angle diagnostics.
@@ -92,8 +87,8 @@ class VolterraResult:
     # readout map restricted to an orthonormal basis of the relevant span.
     restricted_measurement_matrix: np.ndarray
     # ``visible_coefficient_matrix`` is the kernel-side matrix used for hard OVD.
-    # In the reduced analyzer we identify it with the restricted matrix because the
-    # reduced sector is already constructed directly on the observable side.
+    # In the main analyzer we identify it with the restricted matrix because the
+    # Volterra sector is already constructed directly on the observable side.
     visible_coefficient_matrix: np.ndarray
     singular_values: np.ndarray
     restricted_singular_values: np.ndarray
@@ -259,7 +254,7 @@ class TruncatedVolterraGenerator:
 
 
 @dataclass(frozen=True)
-class _ReducedWordState:
+class _ObservableWordState:
     operator: np.ndarray
     total_order: int
     total_drift: int
@@ -326,7 +321,7 @@ def _finalize_result(
     algebraic_tol: float,
 ) -> VolterraResult:
     # This helper centralizes the visible-side diagnostics so the dense PTM path
-    # and the reduced observable-side path are evaluated through exactly the same
+    # and the observable-side path are evaluated through exactly the same
     # post-processing layer once they supply their span/basis matrices.
     latent_basis_matrix = ensure_finite("latent basis matrix", latent_basis_matrix)
     restricted_measurement_matrix = ensure_finite("restricted measurement matrix", restricted_measurement_matrix)
@@ -375,8 +370,8 @@ def _finalize_result(
     )
 
 
-class IsingVolterraAnalyzer:
-    """High-level orchestrator for the dense PTM/Volterra diagnostics."""
+class DenseVolterraAnalyzer:
+    """Dense PTM-based Volterra diagnostics for small-system validation."""
 
     def __init__(
         self,
@@ -457,8 +452,8 @@ class IsingVolterraAnalyzer:
         )
 
 
-class ReducedVolterraBasisBuilder:
-    """Generate the exact ``(P, L)``-truncated reduced observable sector.
+class ObservableVolterraBasisBuilder:
+    """Generate the exact ``(P, L)``-truncated observable-side Volterra sector.
 
     The generated span is the paper's observable-side sector
 
@@ -495,13 +490,13 @@ class ReducedVolterraBasisBuilder:
     def build(self) -> Tuple[List[FeatureLabel], List[np.ndarray]]:
         basis: List[np.ndarray] = []
         labels: List[FeatureLabel] = []
-        stack: List[_ReducedWordState] = []
+        stack: List[_ObservableWordState] = []
 
         for seed_index, observable in enumerate(self.seed_observables):
             # Example seed states for ``observables = [Z0, Z1]``:
             # first push ``(seed_index=0, word=())``, then ``(seed_index=1, word=())``.
             stack.append(
-                _ReducedWordState(
+                _ObservableWordState(
                     operator=np.asarray(observable, dtype=complex),
                     total_order=0,
                     total_drift=0,
@@ -532,7 +527,7 @@ class ReducedVolterraBasisBuilder:
                 # adjoint step". Enumerating these steps explicitly makes the code
                 # follow the paper's ``sum m_j <= L`` truncation literally.
                 stack.append(
-                    _ReducedWordState(
+                    _ObservableWordState(
                         operator=self.model.channel_adjoint(self.expansion_point, state.operator),
                         total_order=state.total_order,
                         total_drift=state.total_drift + 1,
@@ -548,7 +543,7 @@ class ReducedVolterraBasisBuilder:
                 # The finite-difference derivative implements the paper's ``M_q``
                 # without ever building a dense PTM/Liouville matrix.
                 stack.append(
-                    _ReducedWordState(
+                    _ObservableWordState(
                         operator=self.model.channel_derivative_adjoint(
                             q,
                             state.operator,
@@ -568,8 +563,8 @@ class ReducedVolterraBasisBuilder:
         return labels, basis
 
 
-class ReducedVolterraAnalyzer:
-    """Observable-side reduced Volterra diagnostics without dense PTM construction."""
+class VolterraAnalyzer:
+    """Main observable-side Volterra diagnostics without dense PTM construction."""
 
     def __init__(
         self,
@@ -590,7 +585,7 @@ class ReducedVolterraAnalyzer:
         self.max_basis_size = max_basis_size
         self.expansion_point = float(expansion_point)
         self.observables = list(observables) if observables is not None else model.default_memory_observables()
-        self.builder = ReducedVolterraBasisBuilder(
+        self.builder = ObservableVolterraBasisBuilder(
             model=model,
             seed_observables=self.observables,
             max_order=max_order,
@@ -606,10 +601,10 @@ class ReducedVolterraAnalyzer:
         for j, observable in enumerate(self.observables):
             for ell, basis_op in enumerate(basis_ops):
                 # Each entry is the raw readout functional ``tr(M_j H_ell)`` in
-                # Hilbert-Schmidt form, matching the paper's reduced matrix.
+                # Hilbert-Schmidt form, matching the paper's observable-side matrix.
                 out[j, ell] = hs_inner_product(observable, basis_op)
                 # Example: ``out[0, 3]`` is the overlap between observable ``Z0``
-                # and reduced basis operator ``H_3``.
+                # and observable-side basis operator ``H_3``.
         return ensure_finite("restricted measurement matrix", out)
 
     def analyze(
@@ -619,7 +614,7 @@ class ReducedVolterraAnalyzer:
         noise_scale: float = 1.0,
     ) -> VolterraResult:
         monomials, basis_ops = self.builder.build()
-        # Example reduced output:
+        # Example observable-side output:
         # ``monomials = [(2, 1), (2, 0, 1), (1, 2)]`` and ``len(basis_ops) == 3``.
         tau = _noise_threshold(n_shots=n_shots, delta=delta, noise_scale=noise_scale)
 
@@ -628,15 +623,15 @@ class ReducedVolterraAnalyzer:
             return _empty_result(monomials, empty_latent, len(self.observables), tau)
 
         restricted = self._restricted_measurement_matrix(basis_ops)
-        # The reduced builder already returns an orthonormal operator basis, so
+        # The observable-side builder already returns an orthonormal operator basis, so
         # flattening it gives both the ambient-space basis for angle diagnostics
         # and the latent-basis matrix consumed by the shared evaluation layer.
         latent_columns = np.column_stack([np.asarray(op, dtype=complex).reshape(-1) for op in basis_ops])
-        # Example shapes with ``n_memory = 2`` and 3 reduced basis operators:
+        # Example shapes with ``n_memory = 2`` and 3 observable-side basis operators:
         # ``restricted.shape == (2, 3)``, ``latent_columns.shape == (16, 3)``.
         readout_nullspace = null_space(_ambient_readout_matrix(self.observables), tol=self.algebraic_tol)
 
-        # In the reduced methodology the orthonormalized basis itself is the
+        # In the observable-side methodology the orthonormalized basis itself is the
         # restricted-side basis, so the kernel-side and restricted-side visible
         # matrices coincide.
         return _finalize_result(
@@ -652,10 +647,10 @@ class ReducedVolterraAnalyzer:
 
 
 __all__ = [
-    "IsingVolterraAnalyzer",
+    "DenseVolterraAnalyzer",
     "PTMAffineExpansion",
-    "ReducedVolterraAnalyzer",
-    "ReducedVolterraBasisBuilder",
+    "ObservableVolterraBasisBuilder",
     "TruncatedVolterraGenerator",
+    "VolterraAnalyzer",
     "VolterraResult",
 ]

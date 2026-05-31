@@ -7,7 +7,7 @@ the common case where an experiment:
 
 1. reads a Hydra config with ``sweep`` and ``experiment`` sections
 2. builds models through ``build_sweep(...)``
-3. runs ``IsingVolterraAnalyzer`` on each sweep value
+3. runs ``VolterraAnalyzer`` on each sweep value
 4. stores a standard row schema with the main pyqres diagnostics
 5. saves a CSV, resolved config, and a small number of line plots
 
@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
-from .analysis import IsingVolterraAnalyzer, VolterraResult
+from .analysis import VolterraAnalyzer, VolterraResult
 from .linalg_utils import NumericalStabilityError
 from .sweep import SweepFamilyProtocol, build_sweep
 
@@ -246,7 +246,7 @@ def run_standard_analysis_sweep(
                     flush=True,
                 )
 
-            analyzer = IsingVolterraAnalyzer(
+            analyzer = VolterraAnalyzer(
                 model,
                 observables=observables,
                 max_order=_cfg_int(cfg.experiment, "max_order", 2),

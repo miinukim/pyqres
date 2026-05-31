@@ -250,13 +250,18 @@ from pyqres.dim import (
     IsingReservoirModel,
     IsingReservoirParameters,
     QRCLibExactReservoirModel,
-    IsingVolterraAnalyzer,
-    ReducedVolterraAnalyzer,
+    VolterraAnalyzer,
+    DenseVolterraAnalyzer,
     TruncatedVolterraGenerator,
     compressed_visibility_diagnostics,
     compressed_visibility_metrics,
 )
 ```
+
+`VolterraAnalyzer` is the default analyzer. It constructs the truncated
+observable-side Volterra sector directly and avoids building the dense PTM.
+`DenseVolterraAnalyzer` keeps the dense PTM route available for small systems,
+debugging, and cross-checks.
 
 Use this layer for questions like:
 
@@ -390,16 +395,16 @@ model = fit_softmax_readout(X_train, y_train, SoftmaxReadoutConfig())
 predictions = predict_softmax_readout(X_test, model)
 ```
 
-Analyze a reservoir through PTM/Volterra tools:
+Analyze a reservoir through the default observable-side Volterra tools:
 
 ```python
-from pyqres.dim import QRCLibExactReservoirModel, IsingVolterraAnalyzer
+from pyqres.dim import QRCLibExactReservoirModel, VolterraAnalyzer
 from pyqres.simulation import ExactQRCModelConfig
 
 model = QRCLibExactReservoirModel(
     config=ExactQRCModelConfig(n_system=2, n_ancilla=1, seed=1)
 )
-analyzer = IsingVolterraAnalyzer(model)
+analyzer = VolterraAnalyzer(model)
 ```
 
 ## Development Checks
