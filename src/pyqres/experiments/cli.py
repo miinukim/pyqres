@@ -531,7 +531,6 @@ def run_symbol_channel_equalization_benchmark_from_cfg(cfg: DictConfig) -> Dict[
         hx0_scale=float(cfg.reservoir_params.hx0_scale),
         hz1_scale=float(cfg.reservoir_params.hz1_scale),
         J_scale=float(cfg.reservoir_params.J_scale),
-        graph_kind=str(cfg.reservoir_params.graph_kind),
     ).generate()
     reservoir = ChannelMapReservoir(
         ChannelMapReservoirConfig(

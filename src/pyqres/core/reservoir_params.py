@@ -248,8 +248,8 @@ class ReservoirParams:
 
     The Ising-type preset produces explicit vectors/matrices:
     transverse fields `hx0_vec`, input-modulated longitudinal fields `hz1_vec`,
-    and pairwise ZZ couplings `J_mat`. This dataclass provides reproducible
-    defaults so experiments can be described by a compact seed plus graph type.
+    and nearest-neighbor open-boundary ZZ couplings `J_mat`. This dataclass
+    provides reproducible defaults so experiments can be described compactly.
 
     For broader Hamiltonians, set `hamiltonian_kind="matrix"` and provide
     `h0_matrix`/`h1_matrix`, or set `hamiltonian_kind="pauli_terms"` and provide
@@ -268,7 +268,6 @@ class ReservoirParams:
     hx0_scale: float = 1.0
     hz1_scale: float = 1.0
     J_scale: float = 1.0
-    graph_kind: str = "full"
     h0_matrix: Any | None = None
     h1_matrix: Any | None = None
     h0_hamiltonian: HamiltonianSpec | None = None
@@ -421,30 +420,11 @@ class ReservoirParams:
         hx0 = (self.hx0_base + self.hx0_std * rs.randn(n)) * self.hx0_scale
         hz1 = (self.hz1_base + self.hz1_std * rs.randn(n)) * self.hz1_scale
 
+        # Standard open-boundary Ising chain: only nearest-neighbor ZZ couplings
+        # are active, with no wrap-around edge between the last and first qubit.
         J_graph = np.zeros((n, n), dtype=float)
-        graph_kind = self.graph_kind.lower()
-        if graph_kind == "full":
-            # Fully connected graph over all system and ancilla qubits.
-            for i in range(n):
-                for j in range(i + 1, n):
-                    J_graph[i, j] = 1.0
-        elif graph_kind == "rank6":
-            # Historical six-qubit sparse graph used by earlier QRC rank tests.
-            if n != 6:
-                raise ValueError("graph_kind='rank6' is only defined for 6 total qubits.")
-            J_graph = np.array(
-                [
-                    [0, 0, 1, 1, 0, 0],
-                    [0, 0, 0, 0, 1, 1],
-                    [0, 0, 0, 1, 0, 0],
-                    [0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 1],
-                    [0, 0, 0, 0, 0, 0],
-                ],
-                dtype=float,
-            )
-        else:
-            raise ValueError(f"Unsupported graph_kind '{self.graph_kind}'.")
+        for i in range(n - 1):
+            J_graph[i, i + 1] = 1.0
 
         J = self.J_scale * (rs.rand(n, n) * J_graph)
         h0, h1 = self._ising_hamiltonian_specs(hx0, hz1, J)

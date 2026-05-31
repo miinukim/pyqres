@@ -82,7 +82,6 @@ class CompressedVisibilityDiagnostics:
 
     ambient_dim: int
     r_visible: int
-    r_eff: int
     alpha_ambient: float
     s_gamma: int
     exact_null_dim: int
@@ -128,7 +127,6 @@ class CompressedVisibilityDiagnostics:
         return {
             "ambient_dim": self.ambient_dim,
             "r_visible": self.r_visible,
-            "r_eff": self.r_eff,
             "alpha_ambient": self.alpha_ambient,
             "s_gamma": self.s_gamma,
             "exact_null_dim": self.exact_null_dim,
@@ -214,7 +212,6 @@ def compressed_visibility_diagnostics(
         return CompressedVisibilityDiagnostics(
             ambient_dim=ambient_dim,
             r_visible=r_visible,
-            r_eff=r_visible,
             alpha_ambient=alpha_ambient,
             s_gamma=0,
             exact_null_dim=0,
@@ -261,7 +258,6 @@ def compressed_visibility_diagnostics(
         return CompressedVisibilityDiagnostics(
             ambient_dim=ambient_dim,
             r_visible=r_visible,
-            r_eff=r_visible,
             alpha_ambient=alpha_ambient,
             s_gamma=s_gamma,
             exact_null_dim=exact_null_dim,
@@ -295,7 +291,6 @@ def compressed_visibility_diagnostics(
         return CompressedVisibilityDiagnostics(
             ambient_dim=ambient_dim,
             r_visible=r_visible,
-            r_eff=r_visible,
             alpha_ambient=alpha_ambient,
             s_gamma=s_gamma,
             exact_null_dim=s_gamma,
@@ -334,7 +329,6 @@ def compressed_visibility_diagnostics(
     return CompressedVisibilityDiagnostics(
         ambient_dim=ambient_dim,
         r_visible=r_visible,
-        r_eff=r_visible,
         alpha_ambient=alpha_ambient,
         s_gamma=s_gamma,
         exact_null_dim=int(s_gamma - supported_dim),

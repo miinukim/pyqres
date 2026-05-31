@@ -108,7 +108,6 @@ from pyqres.simulation import ExactQRCModel, ExactQRCModelConfig
 ising_kwargs = ReservoirParams.ising_type(
     n_system=2,
     n_ancilla=1,
-    graph_kind="full",
 ).generate()
 # With the qiskit extra installed, this stays symbolic for Qiskit/Aer routing.
 qiskit_ready_h0 = ising_kwargs["H0_hamiltonian"].to_sparse_pauli_op()

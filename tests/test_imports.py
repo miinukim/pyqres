@@ -82,6 +82,8 @@ def test_qiskit_hamiltonian_like_inputs():
     ising_params = ReservoirParams.ising_type(n_system=1, n_ancilla=1, seed=2).generate()
     ising_op = ising_params["H0_hamiltonian"].to_sparse_pauli_op()
     assert isinstance(ising_op, qi.SparsePauliOp)
+    assert np.count_nonzero(ising_params["J_mat"]) == 1
+    assert ising_params["J_mat"][0, 1] != 0.0
     spec_ising_model = ExactQRCModel(ExactQRCModelConfig(**ising_params))
     vector_ising_model = ExactQRCModel(
         ExactQRCModelConfig(

@@ -204,7 +204,6 @@ class ExactQRCModelConfig:
     hz1_vec: Optional[np.ndarray] = None
     J_mat: Optional[np.ndarray] = None
     seed: int = 17462
-    connectivity_kind: str = "full"
     control: MeasurementControlConfig = field(default_factory=MeasurementControlConfig)
 
 
@@ -259,7 +258,6 @@ class ExactQRCModel:
                 n_ancilla=self.nA,
                 tau=cfg.tau,
                 seed=cfg.seed,
-                graph_kind=cfg.connectivity_kind,
             ).generate()
             self.hx0 = np.asarray(generated["hx0_vec"], dtype=float)
             self.hz1 = np.asarray(generated["hz1_vec"], dtype=float)

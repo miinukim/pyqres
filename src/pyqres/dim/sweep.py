@@ -251,19 +251,12 @@ class SweepExperiment:
                     "latent_dim": int(result.latent_dim),
                     "vvr": int(result.vvr),
                     "ovd": int(result.ovd),
-                    "whitened_ovd": int(result.whitened_ovd),
-                    "soft_ovd": float(result.soft_ovd),
-                    "visible_effective_rank": float(result.visible_effective_rank),
-                    "whitened_effective_rank": float(result.whitened_effective_rank),
                     "noise_threshold": float(result.noise_threshold),
                     "n_features": int(len(result.monomials)),
                     "n_observables": int(len(observables)),
                     "singular_values": json.dumps([float(x) for x in np.real_if_close(result.singular_values)]),
                     "restricted_singular_values": json.dumps(
                         [float(x) for x in np.real_if_close(result.restricted_singular_values)]
-                    ),
-                    "whitened_singular_values": json.dumps(
-                        [float(x) for x in np.real_if_close(result.whitened_singular_values)]
                     ),
                     "principal_angles_deg": json.dumps([float(x) for x in angles]),
                     "parameters": json.dumps(asdict(params)),
@@ -289,7 +282,6 @@ class SweepExperiment:
             plt.plot(group["sweep_value"], group["latent_dim"], marker="o", label=f"{label} latent dim")
             plt.plot(group["sweep_value"], group["vvr"], marker="s", linestyle="--", label=f"{label} VVR")
             plt.plot(group["sweep_value"], group["ovd"], marker="^", linestyle=":", label=f"{label} OVD")
-            plt.plot(group["sweep_value"], group["soft_ovd"], marker="d", linestyle="-.", label=f"{label} SOVD")
         plt.xlabel(self.sweep.parameter_label())
         plt.ylabel("dimension / rank")
         plt.legend()

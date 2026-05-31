@@ -33,7 +33,6 @@ from .sweep import SweepFamilyProtocol, build_sweep
 
 AnalysisExtraRowFn = Callable[[VolterraResult, Any, Any, Sequence[np.ndarray], float], Mapping[str, Any]]
 FailureExtraRowFn = Callable[[Exception, float], Mapping[str, Any]]
-CovarianceModelFn = Callable[[Any, Any, Sequence[np.ndarray], float], float | np.ndarray | None]
 
 _PAULIS = ("X", "Y", "Z")
 
@@ -155,10 +154,6 @@ def _standard_analysis_row(
         "latent_dim": int(result.latent_dim),
         "vvr": int(result.vvr),
         "ovd": int(result.ovd),
-        "whitened_ovd": int(result.whitened_ovd),
-        "soft_ovd": float(result.soft_ovd),
-        "visible_effective_rank": float(result.visible_effective_rank),
-        "whitened_effective_rank": float(result.whitened_effective_rank),
         "noise_threshold": float(result.noise_threshold),
         "n_observables": int(len(observables)),
         "n_features": int(len(result.monomials)),
@@ -168,9 +163,6 @@ def _standard_analysis_row(
         "singular_values": json.dumps([float(x) for x in np.real_if_close(result.singular_values)]),
         "restricted_singular_values": json.dumps(
             [float(x) for x in np.real_if_close(result.restricted_singular_values)]
-        ),
-        "whitened_singular_values": json.dumps(
-            [float(x) for x in np.real_if_close(result.whitened_singular_values)]
         ),
         "principal_angles_deg": json.dumps([float(x) for x in angles]),
         "observable_specs": json.dumps(list(observable_specs)),
@@ -196,10 +188,6 @@ def _standard_failure_row(
         "latent_dim": np.nan,
         "vvr": np.nan,
         "ovd": np.nan,
-        "whitened_ovd": np.nan,
-        "soft_ovd": np.nan,
-        "visible_effective_rank": np.nan,
-        "whitened_effective_rank": np.nan,
         "noise_threshold": np.nan,
         "n_observables": np.nan,
         "n_features": np.nan,
@@ -208,7 +196,6 @@ def _standard_failure_row(
         "max_angle_deg": np.nan,
         "singular_values": "[]",
         "restricted_singular_values": "[]",
-        "whitened_singular_values": "[]",
         "principal_angles_deg": "[]",
         "observable_specs": "[]",
         "parameters": "",
@@ -221,7 +208,6 @@ def run_standard_analysis_sweep(
     sweep_values: Sequence[float] | None = None,
     extra_row_fn: AnalysisExtraRowFn | None = None,
     failure_row_fn: FailureExtraRowFn | None = None,
-    covariance_model_fn: CovarianceModelFn | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Run the standard pyqres Ising analysis across a 1D sweep.
@@ -270,16 +256,10 @@ def run_standard_analysis_sweep(
                 expansion_point=_cfg_float(cfg.experiment, "expansion_point", 0.0),
             )
 
-            covariance_model = (
-                None
-                if covariance_model_fn is None
-                else covariance_model_fn(params, model, observables, float(sweep_value))
-            )
             result = analyzer.analyze(
                 n_shots=_cfg_int(cfg.experiment, "n_shots", 2000),
                 delta=_cfg_float(cfg.experiment, "delta", 0.05),
                 noise_scale=_cfg_float(cfg.experiment, "noise_scale", 1.0),
-                covariance_model=covariance_model,
             )
 
             row = _standard_analysis_row(
@@ -296,8 +276,7 @@ def run_standard_analysis_sweep(
             if verbose:
                 print(
                     f"[{idx}/{total}] done: latent_dim={result.latent_dim}, "
-                    f"vvr={result.vvr}, ovd={result.ovd}, "
-                    f"soft_ovd={result.soft_ovd:.6g}",
+                    f"vvr={result.vvr}, ovd={result.ovd}",
                     flush=True,
                 )
         except (MemoryError, NumericalStabilityError, ValueError) as exc:
@@ -367,7 +346,6 @@ def save_line_metric_plot(
 
 __all__ = [
     "AnalysisExtraRowFn",
-    "CovarianceModelFn",
     "FailureExtraRowFn",
     "LineMetricSpec",
     "run_standard_analysis_sweep",

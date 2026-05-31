@@ -152,50 +152,6 @@ def null_space(mat: np.ndarray, tol: float = 1e-10) -> np.ndarray:
     return la.null_space(mat, rcond=tol)
 
 
-def positive_matrix_pseudoinverse_sqrt(mat: np.ndarray, tol: float = 1e-10) -> np.ndarray:
-    ensure_finite("positive semidefinite matrix", mat)
-    hermitian = 0.5 * (np.asarray(mat, dtype=complex) + np.asarray(mat, dtype=complex).conj().T)
-    evals, evecs = la.eigh(hermitian, check_finite=True)
-    clipped = np.clip(np.real_if_close(evals), 0.0, None)
-    inv_sqrt = np.zeros_like(clipped, dtype=float)
-    mask = clipped > tol
-    inv_sqrt[mask] = 1.0 / np.sqrt(clipped[mask])
-    return ensure_finite(
-        "matrix pseudoinverse square root",
-        (evecs * inv_sqrt) @ evecs.conj().T,
-    )
-
-
-def effective_rank_psd(mat: np.ndarray, tol: float = 1e-12) -> float:
-    if mat.size == 0:
-        return 0.0
-    hermitian = 0.5 * (np.asarray(mat, dtype=complex) + np.asarray(mat, dtype=complex).conj().T)
-    # For positive semidefinite inputs the eigenvalues are the visibility-strength
-    # weights whose concentration is summarized by the effective rank (Tr G)^2 / Tr(G^2).
-    evals = np.clip(np.real_if_close(la.eigvalsh(hermitian, check_finite=True)), 0.0, None)
-    weight = float(np.sum(evals))
-    if weight <= tol:
-        return 0.0
-    sq_weight = float(np.sum(evals**2))
-    if sq_weight <= tol:
-        return 0.0
-    return float((weight**2) / sq_weight)
-
-
-def ridge_effective_dimension_psd(mat: np.ndarray, tol: float = 1e-12) -> float:
-    if mat.size == 0:
-        return 0.0
-    hermitian = 0.5 * (np.asarray(mat, dtype=complex) + np.asarray(mat, dtype=complex).conj().T)
-    # This is the spectral form sum_j lambda_j / (1 + lambda_j), which is the
-    # soft/ridge effective dimension used for SOVD.
-    evals = np.clip(np.real_if_close(la.eigvalsh(hermitian, check_finite=True)), 0.0, None)
-    active = evals > tol
-    if not np.any(active):
-        return 0.0
-    return float(np.sum(evals[active] / (1.0 + evals[active])))
-
-
-
 def finite_difference_weights(order: int, points: Sequence[int]) -> np.ndarray:
     # Solve the standard Vandermonde system for a finite-difference stencil centered at zero.
     # The resulting weights satisfy sum_j w_j f(p_j h) ~= h^order f^(order)(0).

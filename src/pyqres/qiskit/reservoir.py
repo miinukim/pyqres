@@ -52,8 +52,11 @@ class QRCReservoir:
         rs = np.random.RandomState(cfg.seed)
         self.hx0 = 1.0 + 0.3 * rs.randn(n)
         self.hz1 = 1.0 + 0.3 * rs.randn(n)
-        J = rs.rand(n, n)
-        self.J = np.triu(J, 1)
+        # Match ReservoirParams.ising_type: an open-boundary nearest-neighbor
+        # Ising chain with no configurable graph topology.
+        self.J = np.zeros((n, n), dtype=float)
+        for i in range(n - 1):
+            self.J[i, i + 1] = float(rs.rand())
         self.input_sign = rs.choice([-1.0, 1.0], size=n)
 
     def _to_sparse_pauli_op(self, hamiltonian_like: object | None) -> "SparsePauliOp":

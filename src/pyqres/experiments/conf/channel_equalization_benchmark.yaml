@@ -28,7 +28,6 @@ reservoir_params:
   hx0_scale: 2.0
   hz1_scale: 0.5
   J_scale: 1.0
-  graph_kind: full
 
 reservoir:
   kind: channel_map

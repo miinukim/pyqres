@@ -21,18 +21,14 @@ import numpy as np
 import scipy.linalg as la
 
 from .linalg_utils import (
-    checked_matmul,
     derivative_from_samples,
-    effective_rank_psd,
     ensure_finite,
     hs_inner_product,
     matrix_rank,
     null_space,
     orthogonalize_operator,
     orthonormal_basis_from_columns,
-    positive_matrix_pseudoinverse_sqrt,
     principal_angles,
-    ridge_effective_dimension_psd,
 )
 
 FeatureLabel = Tuple[int, ...]
@@ -89,8 +85,8 @@ class VolterraResult:
     # Its columns are PTM traceless coordinates in the dense path and flattened
     # operator columns in the reduced observable-side path.
     latent_kernel_matrix: np.ndarray
-    # ``latent_basis_matrix`` is an orthonormal basis for the span that is actually
-    # used for principal-angle and Gram-geometry diagnostics.
+    # ``latent_basis_matrix`` is an orthonormal basis for the span used by
+    # restricted readout and principal-angle diagnostics.
     latent_basis_matrix: np.ndarray
     # ``restricted_measurement_matrix`` is the ``O_{P,L}`` object: the
     # readout map restricted to an orthonormal basis of the relevant span.
@@ -99,26 +95,11 @@ class VolterraResult:
     # In the reduced analyzer we identify it with the restricted matrix because the
     # reduced sector is already constructed directly on the observable side.
     visible_coefficient_matrix: np.ndarray
-    visible_gram_matrix: np.ndarray
-    # ``covariance_matrix`` is the noise model used for whitening. By default this
-    # is isotropic with scale ``tau(N, delta)^2``, but callers may override it.
-    covariance_matrix: np.ndarray
-    whitened_restricted_measurement_matrix: np.ndarray
-    whitened_visible_coefficient_matrix: np.ndarray
-    whitened_visible_gram_matrix: np.ndarray
     singular_values: np.ndarray
     restricted_singular_values: np.ndarray
-    whitened_singular_values: np.ndarray
-    visible_gram_eigenvalues: np.ndarray
-    whitened_gram_eigenvalues: np.ndarray
     vvr: int
     ovd: int
-    whitened_ovd: int
-    soft_ovd: float
     latent_dim: int
-    visible_effective_rank: float
-    whitened_effective_rank: float
-    principal_angles_rad: np.ndarray
     principal_angles_deg: np.ndarray
     noise_threshold: float
 
@@ -151,19 +132,17 @@ class PTMAffineExpansion:
         T0 = self.model.ptm(self.expansion_point)
         # Example: for ``n_memory = 2``, ``T0.shape == (16, 16)`` and the
         # traceless block ``T0[1:, 1:]`` has shape ``(15, 15)``.
-        ensure_finite("PTM at expansion point", T0)
         rho = np.eye(self.model.dim_memory, dtype=complex) / self.model.dim_memory
         # Example initial state for ``n_memory = 2``:
         # ``rho = I_4 / 4 = diag(0.25, 0.25, 0.25, 0.25)``.
         # Iterate to find the fixed point
-        for _ in range(10000):
+        fp_max_iter = 10000
+        for _ in range(fp_max_iter):
             new_rho = self.model.channel(self.expansion_point, rho)
-            new_rho = 0.5 * (new_rho + new_rho.conj().T)
-            ensure_finite("fixed-point iterate", new_rho)
+            new_rho = 0.5 * (new_rho + new_rho.conj().T)    # Ensure Hermiticity
             tr = np.trace(new_rho)
             if abs(tr) > 1e-15:
-                new_rho /= tr
-            ensure_finite("normalized fixed-point iterate", new_rho)
+                new_rho /= tr                               # Ensure normalization
             if np.linalg.norm(new_rho - rho, ord="fro") < 1e-12:
                 rho = new_rho
                 break
@@ -174,9 +153,8 @@ class PTMAffineExpansion:
         basis = self.model.memory_basis
         dim = self.model.dim_memory
         xbar = []
-        for idx, pauli in enumerate(basis):
-            product = checked_matmul(f"basis[{idx}] @ rho_bar", pauli, self.rho_bar)
-            xbar.append(np.trace(product) / dim)
+        for pauli in basis:
+            xbar.append(np.trace(pauli @ self.rho_bar) / dim)
         self.xbar_tr = ensure_finite("xbar_tr", np.array(xbar, dtype=complex)[1:])
 
         A_samples = []
@@ -186,18 +164,16 @@ class PTMAffineExpansion:
             # Example with ``fd_step = 5e-3`` and ``points = [-3, ..., 3]``:
             # sampled inputs are ``-0.015, -0.010, ..., 0.015`` around ``u0 = 0``.
             T = self.model.ptm(u)
-            ensure_finite(f"PTM at u={u}", T)
             self.T_samples[point] = T
             A_u = T[1:, 1:]
             c_u = T[1:, 0]
-            Ax = checked_matmul(f"A_u @ xbar_tr at u={u}", A_u, self.xbar_tr)
-            b_u = ensure_finite(f"b_u at u={u}", c_u + Ax - self.xbar_tr)
+            b_u = c_u + A_u @ self.xbar_tr - self.xbar_tr
             # Example shapes for ``n_memory = 2``:
             # ``A_u.shape == (15, 15)``, ``c_u.shape == (15,)``, ``b_u.shape == (15,)``.
-            A_samples.append(ensure_finite(f"A_u at u={u}", A_u))
+            A_samples.append(A_u)
             b_samples.append(b_u)
 
-        self.A_derivs[0] = ensure_finite("A_derivs[0]", T0[1:, 1:])
+        self.A_derivs[0] = T0[1:, 1:]
         self.b_derivs[0] = np.zeros_like(self.xbar_tr)
         for order in range(1, self.max_order + 1):
             self.A_derivs[order] = ensure_finite(
@@ -300,82 +276,29 @@ def _noise_threshold(n_shots: int, delta: float, noise_scale: float) -> float:
 def _empty_result(
     monomials: List[FeatureLabel],
     latent_kernel_matrix: np.ndarray,
-    covariance_matrix: np.ndarray,
+    n_visible: int,
     noise_threshold: float,
 ) -> VolterraResult:
     # Keep the zero-feature case explicit so callers always receive a fully shaped
     # result object and do not need to special-case empty matrices downstream.
-    n_visible = covariance_matrix.shape[0]
     latent_basis = np.zeros((latent_kernel_matrix.shape[0], 0), dtype=complex)
     restricted = np.zeros((n_visible, 0), dtype=complex)
-    gram = np.zeros((0, 0), dtype=complex)
     # Example empty shapes:
-    # ``latent_kernel_matrix.shape == (15, 0)``, ``restricted.shape == (2, 0)``,
-    # ``gram.shape == (0, 0)``.
+    # ``latent_kernel_matrix.shape == (15, 0)`` and ``restricted.shape == (2, 0)``.
     return VolterraResult(
         monomials=monomials,
         latent_kernel_matrix=latent_kernel_matrix,
         latent_basis_matrix=latent_basis,
         restricted_measurement_matrix=restricted,
         visible_coefficient_matrix=np.zeros((n_visible, latent_kernel_matrix.shape[1]), dtype=complex),
-        visible_gram_matrix=gram,
-        covariance_matrix=np.asarray(covariance_matrix, dtype=complex),
-        whitened_restricted_measurement_matrix=restricted,
-        whitened_visible_coefficient_matrix=np.zeros((n_visible, latent_kernel_matrix.shape[1]), dtype=complex),
-        whitened_visible_gram_matrix=gram,
         singular_values=np.array([], dtype=float),
         restricted_singular_values=np.array([], dtype=float),
-        whitened_singular_values=np.array([], dtype=float),
-        visible_gram_eigenvalues=np.array([], dtype=float),
-        whitened_gram_eigenvalues=np.array([], dtype=float),
         vvr=0,
         ovd=0,
-        whitened_ovd=0,
-        soft_ovd=0.0,
         latent_dim=0,
-        visible_effective_rank=0.0,
-        whitened_effective_rank=0.0,
-        principal_angles_rad=np.array([], dtype=float),
         principal_angles_deg=np.array([], dtype=float),
         noise_threshold=float(noise_threshold),
     )
-
-
-def _coerce_covariance_matrix(
-    covariance_model: float | np.ndarray | None,
-    n_visible: int,
-    default_noise_threshold: float,
-) -> np.ndarray:
-    # Whitening is defined for a positive definite covariance model on the visible
-    # coordinates. The helper accepts a few convenient user-facing forms:
-    # ``None`` -> isotropic proxy, scalar -> scalar multiple of identity,
-    # vector -> diagonal covariance, matrix -> full covariance model.
-    if covariance_model is None:
-        # Example default with ``J = 2`` and ``tau = 0.04``:
-        # returns ``diag([0.0016, 0.0016])``.
-        return (default_noise_threshold**2) * np.eye(n_visible, dtype=complex)
-    if np.isscalar(covariance_model):
-        variance = float(covariance_model)
-        if variance <= 0.0:
-            raise ValueError(f"Covariance scalar must be positive, got {variance}.")
-        return variance * np.eye(n_visible, dtype=complex)
-
-    cov = np.asarray(covariance_model, dtype=complex)
-    if cov.ndim == 1:
-        # Example: input ``[0.01, 0.02]`` becomes
-        # ``[[0.01, 0.00], [0.00, 0.02]]``.
-        if cov.shape[0] != n_visible:
-            raise ValueError(
-                f"Covariance diagonal has length {cov.shape[0]}, expected {n_visible} visible coordinates."
-            )
-        if np.any(np.real_if_close(cov) <= 0.0):
-            raise ValueError("Covariance diagonal entries must be positive.")
-        return np.diag(cov)
-    if cov.ndim != 2 or cov.shape != (n_visible, n_visible):
-        raise ValueError(
-            f"Covariance matrix must have shape {(n_visible, n_visible)}, got {cov.shape}."
-        )
-    return 0.5 * (cov + cov.conj().T)
 
 
 def _ambient_readout_matrix(observables: Sequence[np.ndarray]) -> np.ndarray:
@@ -399,10 +322,8 @@ def _finalize_result(
     restricted_measurement_matrix: np.ndarray,
     visible_coefficient_matrix: np.ndarray,
     readout_nullspace_matrix: np.ndarray,
-    covariance_matrix: np.ndarray,
     noise_threshold: float,
     algebraic_tol: float,
-    whitened_operational_threshold: float = 2.0,
 ) -> VolterraResult:
     # This helper centralizes the visible-side diagnostics so the dense PTM path
     # and the reduced observable-side path are evaluated through exactly the same
@@ -410,43 +331,12 @@ def _finalize_result(
     latent_basis_matrix = ensure_finite("latent basis matrix", latent_basis_matrix)
     restricted_measurement_matrix = ensure_finite("restricted measurement matrix", restricted_measurement_matrix)
     visible_coefficient_matrix = ensure_finite("visible coefficient matrix", visible_coefficient_matrix)
-    covariance_matrix = ensure_finite("covariance matrix", covariance_matrix)
     # Example shapes in one small run:
     # ``latent_basis_matrix.shape == (15, 6)``
     # ``restricted_measurement_matrix.shape == (2, 6)``
     # ``visible_coefficient_matrix.shape == (2, 9)``.
 
-    # Whitening moves the visible coordinates into the statistically natural metric
-    # defined by ``Sigma^{-1}``. In the isotropic default this simply rescales all
-    # visible directions by ``1 / tau``.
-    whitening = positive_matrix_pseudoinverse_sqrt(covariance_matrix, tol=algebraic_tol)
-    whitened_restricted = ensure_finite(
-        "whitened restricted measurement matrix",
-        whitening @ restricted_measurement_matrix,
-    )
-    whitened_visible_coefficient = ensure_finite(
-        "whitened visible coefficient matrix",
-        whitening @ visible_coefficient_matrix,
-    )
-    # Example with ``Sigma = diag([0.01, 0.04])``:
-    # ``whitening = diag([10, 5])`` and each row of the visible matrices is
-    # rescaled by its inverse noise standard deviation.
-
-    # ``G_v = O^* O`` and ``G_tilde = O_tilde^* O_tilde`` are the Euclidean and
-    # noise-whitened Gram operators used for effective-rank and soft-OVD metrics.
-    visible_gram = ensure_finite(
-        "visible Gram matrix",
-        restricted_measurement_matrix.conj().T @ restricted_measurement_matrix,
-    )
-    whitened_visible_gram = ensure_finite(
-        "whitened visible Gram matrix",
-        whitened_restricted.conj().T @ whitened_restricted,
-    )
-    # Example: if ``restricted`` has shape ``(2, 6)``, both Gram matrices have
-    # shape ``(6, 6)`` and act on latent-basis coordinates, not visible rows.
-
-    # Hard OVD is defined on the singular spectrum of the kernel-side visible
-    # matrix, whereas the restricted matrix drives the geometric diagnostics.
+    # Hard OVD is defined on the singular spectrum of the kernel-side visible matrix.
     singular_values = ensure_finite(
         "visible singular values",
         la.svdvals(visible_coefficient_matrix) if visible_coefficient_matrix.size else np.array([], dtype=float),
@@ -455,41 +345,16 @@ def _finalize_result(
         "restricted singular values",
         la.svdvals(restricted_measurement_matrix) if restricted_measurement_matrix.size else np.array([], dtype=float),
     )
-    whitened_singular_values = ensure_finite(
-        "whitened visible singular values",
-        la.svdvals(whitened_visible_coefficient) if whitened_visible_coefficient.size else np.array([], dtype=float),
-    )
     # Example singular spectra:
-    # ``singular_values = [0.12, 0.03]``
-    # ``whitened_singular_values = [3.1, 0.8]`` after row whitening.
-
-    visible_gram_eigenvalues = np.clip(
-        np.real_if_close(la.eigvalsh(0.5 * (visible_gram + visible_gram.conj().T), check_finite=True)),
-        0.0,
-        None,
-    )
-    whitened_gram_eigenvalues = np.clip(
-        np.real_if_close(la.eigvalsh(0.5 * (whitened_visible_gram + whitened_visible_gram.conj().T), check_finite=True)),
-        0.0,
-        None,
-    )
+    # ``singular_values = [0.12, 0.03]``.
 
     # ``VVR`` is defined algebraically on the visible image. In exact arithmetic
-    # the kernel-side matrix ``C`` and the restricted matrix ``O`` have the same
-    # rank, but the restricted matrix is numerically better conditioned because it
-    # is built after orthonormalizing the latent span. Use it as the canonical
-    # rank source so geometry-side quantities such as soft OVD cannot exceed VVR
-    # just because the raw spanning family in ``C`` is ill-conditioned.
-    vvr = matrix_rank(restricted_measurement_matrix, tol=algebraic_tol)
+    # this is just the rank of the visible coefficient matrix.
+    vvr = matrix_rank(visible_coefficient_matrix, tol=algebraic_tol)
     ovd = int(np.sum(np.real_if_close(singular_values) > 2.0 * noise_threshold))
-    whitened_ovd = int(np.sum(np.real_if_close(whitened_singular_values) > whitened_operational_threshold))
-    soft_ovd = min(
-        ridge_effective_dimension_psd(whitened_visible_gram, tol=algebraic_tol),
-        float(vvr),
-    )
-    angles = ensure_finite(
+    angles_deg = ensure_finite(
         "principal angles",
-        principal_angles(latent_basis_matrix, readout_nullspace_matrix),
+        np.degrees(principal_angles(latent_basis_matrix, readout_nullspace_matrix)),
     )
     # Example: if ``tau = 0.04`` and ``singular_values = [0.12, 0.03]``,
     # then ``ovd = 1`` because only ``0.12 > 2 * 0.04``.
@@ -500,25 +365,12 @@ def _finalize_result(
         latent_basis_matrix=np.real_if_close(latent_basis_matrix),
         restricted_measurement_matrix=np.real_if_close(restricted_measurement_matrix),
         visible_coefficient_matrix=np.real_if_close(visible_coefficient_matrix),
-        visible_gram_matrix=np.real_if_close(visible_gram),
-        covariance_matrix=np.real_if_close(covariance_matrix),
-        whitened_restricted_measurement_matrix=np.real_if_close(whitened_restricted),
-        whitened_visible_coefficient_matrix=np.real_if_close(whitened_visible_coefficient),
-        whitened_visible_gram_matrix=np.real_if_close(whitened_visible_gram),
         singular_values=np.real_if_close(singular_values),
         restricted_singular_values=np.real_if_close(restricted_singular_values),
-        whitened_singular_values=np.real_if_close(whitened_singular_values),
-        visible_gram_eigenvalues=np.real_if_close(visible_gram_eigenvalues),
-        whitened_gram_eigenvalues=np.real_if_close(whitened_gram_eigenvalues),
         vvr=vvr,
         ovd=ovd,
-        whitened_ovd=whitened_ovd,
-        soft_ovd=soft_ovd,
         latent_dim=int(latent_basis_matrix.shape[1]),
-        visible_effective_rank=effective_rank_psd(visible_gram, tol=algebraic_tol),
-        whitened_effective_rank=effective_rank_psd(whitened_visible_gram, tol=algebraic_tol),
-        principal_angles_rad=np.real_if_close(angles),
-        principal_angles_deg=np.real_if_close(np.degrees(angles)),
+        principal_angles_deg=np.real_if_close(angles_deg),
         noise_threshold=float(noise_threshold),
     )
 
@@ -559,7 +411,6 @@ class IsingVolterraAnalyzer:
         n_shots: int = 2000,
         delta: float = 0.05,
         noise_scale: float = 1.0,
-        covariance_model: float | np.ndarray | None = None,
     ) -> VolterraResult:
         monomials, K = self.generator.generate(tol=self.algebraic_tol)
         ensure_finite("latent kernel matrix", K)
@@ -567,11 +418,10 @@ class IsingVolterraAnalyzer:
         # ``monomials = [(1, 0), (0, 1), (2, 0), (1, 1)]``, ``K.shape = (15, 4)``.
 
         tau = _noise_threshold(n_shots=n_shots, delta=delta, noise_scale=noise_scale)
-        covariance = _coerce_covariance_matrix(covariance_model, len(self.observables), tau)
 
         if K.shape[1] == 0:
             empty_latent = np.zeros((self.model.dim_memory**2 - 1, 0), dtype=complex)
-            return _empty_result(monomials, empty_latent, covariance, tau)
+            return _empty_result(monomials, empty_latent, len(self.observables), tau)
 
         # ``K`` is only a spanning family; QR produces the orthonormal basis needed
         # for the restricted matrix ``O_{P,L}`` and for principal-angle geometry.
@@ -585,11 +435,11 @@ class IsingVolterraAnalyzer:
         # matrices use the raw readout map X -> tr(M_j X). Multiply back by d_M.
         visible_coefficient = ensure_finite(
             "visible coefficient matrix",
-            self.model.dim_memory * checked_matmul("readout @ latent kernel matrix", readout, K),
+            self.model.dim_memory * (readout @ K),
         )
         restricted = ensure_finite(
             "restricted measurement matrix",
-            self.model.dim_memory * checked_matmul("readout @ latent basis matrix", readout, latent_basis),
+            self.model.dim_memory * (readout @ latent_basis),
         )
         readout_nullspace = null_space(readout, tol=self.algebraic_tol)
         # Example:
@@ -602,7 +452,6 @@ class IsingVolterraAnalyzer:
             restricted_measurement_matrix=restricted,
             visible_coefficient_matrix=visible_coefficient,
             readout_nullspace_matrix=readout_nullspace,
-            covariance_matrix=covariance,
             noise_threshold=tau,
             algebraic_tol=self.algebraic_tol,
         )
@@ -768,17 +617,15 @@ class ReducedVolterraAnalyzer:
         n_shots: int = 2000,
         delta: float = 0.05,
         noise_scale: float = 1.0,
-        covariance_model: float | np.ndarray | None = None,
     ) -> VolterraResult:
         monomials, basis_ops = self.builder.build()
         # Example reduced output:
         # ``monomials = [(2, 1), (2, 0, 1), (1, 2)]`` and ``len(basis_ops) == 3``.
         tau = _noise_threshold(n_shots=n_shots, delta=delta, noise_scale=noise_scale)
-        covariance = _coerce_covariance_matrix(covariance_model, len(self.observables), tau)
 
         if not basis_ops:
             empty_latent = np.zeros((self.model.dim_memory**2, 0), dtype=complex)
-            return _empty_result(monomials, empty_latent, covariance, tau)
+            return _empty_result(monomials, empty_latent, len(self.observables), tau)
 
         restricted = self._restricted_measurement_matrix(basis_ops)
         # The reduced builder already returns an orthonormal operator basis, so
@@ -799,7 +646,6 @@ class ReducedVolterraAnalyzer:
             restricted_measurement_matrix=restricted,
             visible_coefficient_matrix=restricted,
             readout_nullspace_matrix=readout_nullspace,
-            covariance_matrix=covariance,
             noise_threshold=tau,
             algebraic_tol=self.algebraic_tol,
         )
