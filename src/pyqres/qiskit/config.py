@@ -25,7 +25,7 @@ class NoiseConfig:
     """Simple Aer noise-model builder.
 
     The parameters are intentionally backend-agnostic experiment knobs. They are
-    converted to Qiskit Aer errors only when `to_noise_model()` is called, so the
+    converted to Qiskit Aer errors only when to_noise_model() is called, so the
     rest of the package can import configs even without Qiskit installed.
     """
 
@@ -38,7 +38,7 @@ class NoiseConfig:
     p_depol_2q: float = 0.0
 
     def to_noise_model(self) -> "NoiseModel":
-        """Construct a Qiskit Aer `NoiseModel` from damping/depolarizing settings."""
+        """Construct a Qiskit Aer NoiseModel from damping/depolarizing settings."""
 
         if NoiseModel is None:
             raise ImportError("qiskit-aer is required for noise models.")
@@ -75,7 +75,7 @@ class NoiseConfig:
 
 @dataclass
 class QRCConfig:
-    """Circuit-reservoir configuration used by `QRCReservoir`."""
+    """Circuit-reservoir configuration used by QRCReservoir."""
 
     n_system: int = 4
     n_ancilla: int = 2

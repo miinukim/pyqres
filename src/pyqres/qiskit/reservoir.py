@@ -179,8 +179,8 @@ class QRCReservoir:
     def build_streaming_circuit(self, inputs: Sequence[float], measure_system: bool = True) -> Tuple["QuantumCircuit", List[int], List[int]]:
         """Build the full multi-time-step circuit and record bit allocation.
 
-        The returned `sys_bits_per_step` and `anc_bits_per_step` arrays are used
-        by `features_from_counts` to decode the flat classical register into one
+        The returned sys_bits_per_step and anc_bits_per_step arrays are used
+        by features_from_counts to decode the flat classical register into one
         feature vector per time step.
         """
 

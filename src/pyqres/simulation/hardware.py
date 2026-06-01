@@ -1,6 +1,6 @@
 """Trajectory-style exact reservoir frontend.
 
-Unlike `ChannelMapReservoir`, this class samples measurement outcomes and
+Unlike ChannelMapReservoir, this class samples measurement outcomes and
 evolves each shot as a branch trajectory. It is still powered by the dense exact
 core, but its feature estimates look like hardware counts.
 """
@@ -38,7 +38,7 @@ class HardwareTrajectoryReservoir:
             raise ValueError("shots must be > 0.")
 
     def run(self, inputs: Sequence[float]) -> np.ndarray:
-        """Sample `shots` independent trajectories over the same input stream."""
+        """Sample shots independent trajectories over the same input stream."""
 
         counts = np.zeros((len(inputs), self.core.dim_ancilla), dtype=int)
         for _ in range(int(self.cfg.shots)):

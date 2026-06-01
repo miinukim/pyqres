@@ -1,17 +1,17 @@
 # pyqres
 
-`pyqres` is the unified quantum reservoir computing package for this workspace.
+pyqres is the unified quantum reservoir computing package for this workspace.
 It brings together the simulation/Qiskit reservoir runtime, benchmark tasks,
 classical baselines, and PTM/Volterra dimension analysis that were previously
-split across `qrclib` and `qrcdim`.
+split across qrclib and qrcdim.
 
-New code should import from `pyqres.*`. The older package directories can remain
-in the workspace during migration, but `pyqres` now has its own implementation
-modules under `src/pyqres`.
+New code should import from pyqres.*. The older package directories can remain
+in the workspace during migration, but pyqres now has its own implementation
+modules under src/pyqres.
 
 ## Package Layout
 
-```text
+text
 pyqres/
   core/         Shared protocols, measurement control, reservoir parameters
   simulation/   Dense QRC simulation models and simulation frontends
@@ -21,11 +21,11 @@ pyqres/
   baselines/    ESN, logistic, and softmax classical baselines
   experiments/  CLI, Hydra configs, sweep helpers, result utilities
   utils/        Internal numerical utilities
-```
+
 
 The intended dependency direction is inward:
 
-```text
+text
 pyqres.core
   <- pyqres.simulation
   <- pyqres.qiskit
@@ -33,50 +33,50 @@ pyqres.core
   <- pyqres.tasks
   <- pyqres.baselines
   <- pyqres.experiments
-```
 
-`core` should stay lightweight. Runtime implementations and analysis code should
+
+core should stay lightweight. Runtime implementations and analysis code should
 depend on it, not the other way around.
 
 ## Install
 
 For local development from this directory:
 
-```bash
+bash
 python -m pip install -e .
-```
+
 
 Install optional groups as needed:
 
-```bash
+bash
 python -m pip install -e ".[qiskit]"
 python -m pip install -e ".[dim,experiments]"
 python -m pip install -e ".[all]"
-```
+
 
 The optional groups are organized by use case:
 
-- `simulation` - dense simulation dependencies
-- `qiskit` - Qiskit and Qiskit Aer execution
-- `dim` - dimension-analysis dependencies
-- `tasks` - benchmark/task dependencies
-- `experiments` - Hydra, pandas, and plotting helpers
-- `all` - full local research environment
-- `dev` - test and lint tooling
+- simulation - dense simulation dependencies
+- qiskit - Qiskit and Qiskit Aer execution
+- dim - dimension-analysis dependencies
+- tasks - benchmark/task dependencies
+- experiments - Hydra, pandas, and plotting helpers
+- all - full local research environment
+- dev - test and lint tooling
 
-## `pyqres.core`
+## pyqres.core
 
-`pyqres.core` contains shared abstractions that other subpackages use.
+pyqres.core contains shared abstractions that other subpackages use.
 
 Files:
 
-- `core/protocols.py` - minimal reservoir protocols and result containers
-- `core/control.py` - measurement, reset, weak-measurement, and feedback helpers
-- `core/reservoir_params.py` - Hamiltonian presets, Pauli-term builders, and coupling generators
+- core/protocols.py - minimal reservoir protocols and result containers
+- core/control.py - measurement, reset, weak-measurement, and feedback helpers
+- core/reservoir_params.py - Hamiltonian presets, Pauli-term builders, and coupling generators
 
 Important exports:
 
-```python
+python
 from pyqres.core import (
     QRCReservoirProtocol,
     ChannelReservoirProtocol,
@@ -88,19 +88,19 @@ from pyqres.core import (
     PauliTerm,
     ReservoirParams,
 )
-```
+
 
 Use this layer when adding new reservoir implementations that should be usable
 by tasks or analysis code without binding them to one backend.
 
-`ReservoirParams` supports the built-in Ising-type preset as well as broader
+ReservoirParams supports the built-in Ising-type preset as well as broader
 Hamiltonian specifications. Matrix-like inputs can be NumPy arrays, SciPy
-sparse matrices, or Qiskit quantum-info operators such as `SparsePauliOp` and
-`Operator`. Pauli Hamiltonians are carried as backend-neutral `HamiltonianSpec`
-objects so Qiskit/Aer backends can consume `SparsePauliOp` while the dense
+sparse matrices, or Qiskit quantum-info operators such as SparsePauliOp and
+Operator. Pauli Hamiltonians are carried as backend-neutral HamiltonianSpec
+objects so Qiskit/Aer backends can consume SparsePauliOp while the dense
 simulation backend only materializes NumPy matrices at its boundary.
 
-```python
+python
 from pyqres.core import PauliTerm, ReservoirParams
 from pyqres.simulation import ExactQRCModel, ExactQRCModelConfig
 
@@ -132,22 +132,22 @@ matrix_kwargs = ReservoirParams.from_matrices(
     h1_matrix=term_model.H1,
 ).generate()
 matrix_model = ExactQRCModel(ExactQRCModelConfig(**matrix_kwargs))
-```
 
-## `pyqres.simulation`
 
-`pyqres.simulation` contains the dense reservoir simulation implementation and
+## pyqres.simulation
+
+pyqres.simulation contains the dense reservoir simulation implementation and
 simulation frontends.
 
 Files:
 
-- `simulation/exact_qrc.py` - `ExactQRCModel` and `ExactQRCModelConfig`
-- `simulation/channel_map.py` - deterministic channel-map reservoir features
-- `simulation/hardware.py` - sampled hardware-trajectory-style reservoir
+- simulation/exact_qrc.py - ExactQRCModel and ExactQRCModelConfig
+- simulation/channel_map.py - deterministic channel-map reservoir features
+- simulation/hardware.py - sampled hardware-trajectory-style reservoir
 
 Important exports:
 
-```python
+python
 from pyqres.simulation import (
     ExactQRCModel,
     ExactQRCModelConfig,
@@ -156,11 +156,11 @@ from pyqres.simulation import (
     HardwareTrajectoryReservoir,
     HardwareTrajectoryReservoirConfig,
 )
-```
+
 
 Typical use:
 
-```python
+python
 import numpy as np
 
 from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
@@ -174,25 +174,25 @@ cfg = ChannelMapReservoirConfig(
 )
 reservoir = ChannelMapReservoir(cfg)
 features = reservoir.run(np.linspace(-1.0, 1.0, 20))
-```
 
-Use `ExactQRCModel` directly when you need channel-level access, dense unitaries,
+
+Use ExactQRCModel directly when you need channel-level access, dense unitaries,
 or PTM-compatible memory-channel operations. The class name still says "Exact"
 because it denotes the exact dense simulation backend inside the broader
-`simulation` package.
+simulation package.
 
-## `pyqres.qiskit`
+## pyqres.qiskit
 
-`pyqres.qiskit` contains the circuit/backend-facing reservoir implementation.
+pyqres.qiskit contains the circuit/backend-facing reservoir implementation.
 
 Files:
 
-- `qiskit/config.py` - Qiskit reservoir and noise configuration dataclasses
-- `qiskit/reservoir.py` - streaming Qiskit reservoir implementations
+- qiskit/config.py - Qiskit reservoir and noise configuration dataclasses
+- qiskit/reservoir.py - streaming Qiskit reservoir implementations
 
 Important exports:
 
-```python
+python
 from pyqres.core import ReservoirParams
 from pyqres.qiskit import (
     QRCConfig,
@@ -218,33 +218,33 @@ circuit = reservoir.build_streaming_circuit([0.1], measure_system=False)[0]
 # Pass an IBM/Qiskit backend to map the circuit to that backend's target ISA.
 backend = None  # replace with service.backend("ibm_backend_name")
 executable = reservoir.build_executable_circuit([0.1], backend=backend)
-```
+
 
 This layer is for circuit-style reservoir execution, Aer simulation, and noisy
-NISQ-style experiments. `pauli_evolution` uses Qiskit's `PauliEvolutionGate`
+NISQ-style experiments. pauli_evolution uses Qiskit's PauliEvolutionGate
 with configurable product-formula synthesis. That gate is a high-level
-instruction for `exp(-iHt)`; `build_executable_circuit` decomposes/transpiles it
+instruction for exp(-iHt); build_executable_circuit decomposes/transpiles it
 into basis gates for a concrete backend.
 
-## `pyqres.dim`
+## pyqres.dim
 
-`pyqres.dim` contains the PTM/Liouville and Volterra-dimension analysis code.
+pyqres.dim contains the PTM/Liouville and Volterra-dimension analysis code.
 
 Files:
 
-- `dim/pauli.py` - Pauli basis and Pauli-string utilities
-- `dim/linalg_utils.py` - PTM coordinates, ranks, null spaces, derivatives
-- `dim/model.py` - Ising, Floquet Ising, Haar-random, and SYK reservoir models
-- `dim/analysis.py` - affine PTM expansions and Volterra analyzers
-- `dim/isotropy.py` - compressed visibility projector diagnostics
-- `dim/qrclib_model.py` - wrapper from the simulation core into dim analysis
-- `dim/streaming.py` - task-side streaming adapter over the simulation core
-- `dim/sweep.py` - configurable sweep machinery
-- `dim/experiment_utils.py` - reusable experiment table/plot helpers
+- dim/pauli.py - Pauli basis and Pauli-string utilities
+- dim/linalg_utils.py - PTM coordinates, ranks, null spaces, derivatives
+- dim/model.py - Ising, Floquet Ising, Haar-random, and SYK reservoir models
+- dim/analysis.py - affine PTM expansions and Volterra analyzers
+- dim/isotropy.py - compressed visibility projector diagnostics
+- dim/qrclib_model.py - wrapper from the simulation core into dim analysis
+- dim/streaming.py - task-side streaming adapter over the simulation core
+- dim/sweep.py - configurable sweep machinery
+- dim/experiment_utils.py - reusable experiment table/plot helpers
 
 Important exports:
 
-```python
+python
 from pyqres.dim import (
     ReservoirBase,
     IsingReservoirModel,
@@ -256,11 +256,11 @@ from pyqres.dim import (
     compressed_visibility_diagnostics,
     compressed_visibility_metrics,
 )
-```
 
-`VolterraAnalyzer` is the default analyzer. It constructs the truncated
+
+VolterraAnalyzer is the default analyzer. It constructs the truncated
 observable-side Volterra sector directly and avoids building the dense PTM.
-`DenseVolterraAnalyzer` keeps the dense PTM route available for small systems,
+DenseVolterraAnalyzer keeps the dense PTM route available for small systems,
 debugging, and cross-checks.
 
 Use this layer for questions like:
@@ -272,28 +272,28 @@ Use this layer for questions like:
 
 Example bridge from the simulation runtime into dimension analysis:
 
-```python
+python
 from pyqres.dim import QRCLibExactReservoirModel
 from pyqres.simulation import ExactQRCModelConfig
 
 cfg = ExactQRCModelConfig(n_system=2, n_ancilla=1, seed=1)
 model = QRCLibExactReservoirModel(config=cfg)
 ptm = model.ptm(0.0)
-```
 
-## `pyqres.tasks`
 
-`pyqres.tasks` contains benchmark datasets and task runners.
+## pyqres.tasks
+
+pyqres.tasks contains benchmark datasets and task runners.
 
 Files:
 
-- `tasks/stm.py` - short-term memory benchmark
-- `tasks/channel_equalization.py` - nonlinear channel equalization tasks
-- `tasks/mackey_glass.py` - Mackey-Glass time-series forecasting
+- tasks/stm.py - short-term memory benchmark
+- tasks/channel_equalization.py - nonlinear channel equalization tasks
+- tasks/mackey_glass.py - Mackey-Glass time-series forecasting
 
 Important exports:
 
-```python
+python
 from pyqres.tasks import (
     STMConfig,
     STMTaskRunner,
@@ -307,24 +307,24 @@ from pyqres.tasks import (
     MackeyGlassTaskRunner,
     generate_mackey_glass_series,
 )
-```
 
-Task runners expect a reservoir object with a `reset()` method and a `run()` or
-`step()` interface compatible with the task protocol.
 
-## `pyqres.baselines`
+Task runners expect a reservoir object with a reset() method and a run() or
+step() interface compatible with the task protocol.
 
-`pyqres.baselines` contains classical baselines and readout models used for
+## pyqres.baselines
+
+pyqres.baselines contains classical baselines and readout models used for
 comparison.
 
 Files:
 
-- `baselines/esn.py` - echo-state network implementation and benchmark helpers
-- `baselines/classical.py` - logistic equalizer and multiclass softmax readout
+- baselines/esn.py - echo-state network implementation and benchmark helpers
+- baselines/classical.py - logistic equalizer and multiclass softmax readout
 
 Important exports:
 
-```python
+python
 from pyqres.baselines import (
     ESNConfig,
     EchoStateNetwork,
@@ -335,34 +335,34 @@ from pyqres.baselines import (
     fit_softmax_readout,
     predict_softmax_readout,
 )
-```
+
 
 Use this layer to compare QRC reservoirs against classical recurrent or linear
 readout baselines.
 
-## `pyqres.experiments`
+## pyqres.experiments
 
-`pyqres.experiments` contains runnable experiment entry points and sweep helpers.
+pyqres.experiments contains runnable experiment entry points and sweep helpers.
 
 Files:
 
-- `experiments/cli.py` - Hydra-driven CLI entry points and benchmark runners
-- `experiments/conf/` - default Hydra configuration tree
-- `dim/sweep.py` and `dim/experiment_utils.py` - imported through
-  `pyqres.experiments` for sweep-oriented workflows
+- experiments/cli.py - Hydra-driven CLI entry points and benchmark runners
+- experiments/conf/ - default Hydra configuration tree
+- dim/sweep.py and dim/experiment_utils.py - imported through
+  pyqres.experiments for sweep-oriented workflows
 
-Console scripts from `pyproject.toml`:
+Console scripts from pyproject.toml:
 
-```bash
+bash
 pyqres-run
 pyqres-stm-demo
 pyqres-stm-hydra
 pyqres-channel-eq-benchmark
-```
+
 
 Useful imports:
 
-```python
+python
 from pyqres.experiments import (
     build_sweep,
     ConfigurableSweep,
@@ -371,33 +371,33 @@ from pyqres.experiments import (
     save_experiment_table,
     save_line_metric_plot,
 )
-```
+
 
 ## Workflow Examples
 
 Run a simulated reservoir on a benchmark:
 
-```python
+python
 from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
 from pyqres.tasks import STMConfig, STMTaskRunner
 
 reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(n_system=2, n_ancilla=1))
 task = STMConfig(T_total=300, washout=50, train_len=150, test_len=75)
 scores = STMTaskRunner(reservoir, task).run()
-```
+
 
 Fit a softmax readout on collected features:
 
-```python
+python
 from pyqres.baselines import SoftmaxReadoutConfig, fit_softmax_readout, predict_softmax_readout
 
 model = fit_softmax_readout(X_train, y_train, SoftmaxReadoutConfig())
 predictions = predict_softmax_readout(X_test, model)
-```
+
 
 Analyze a reservoir through the default observable-side Volterra tools:
 
-```python
+python
 from pyqres.dim import QRCLibExactReservoirModel, VolterraAnalyzer
 from pyqres.simulation import ExactQRCModelConfig
 
@@ -405,21 +405,21 @@ model = QRCLibExactReservoirModel(
     config=ExactQRCModelConfig(n_system=2, n_ancilla=1, seed=1)
 )
 analyzer = VolterraAnalyzer(model)
-```
+
 
 ## Development Checks
 
 Run the current smoke tests:
 
-```bash
+bash
 python -m pytest -q
-```
+
 
 Compile the package:
 
-```bash
+bash
 python -m compileall -q src/pyqres
-```
+
 
 The smoke tests verify the main public imports and a small simulation/dimension
 bridge path.

@@ -31,7 +31,7 @@ class QRCLibExactReservoirModel(ReservoirBase):
         if self.core.control.post_measurement_mode != "reset":
             # A reset channel maps memory operators to memory operators. Without
             # reset, the effective state lives on the joint system and the PTM
-            # assumptions in `pyqres.dim` do not apply.
+            # assumptions in pyqres.dim do not apply.
             raise ValueError("pyqres PTM analysis requires post_measurement_mode='reset'.")
         self.params = self.core.cfg
         self._initialize_common(self.core.nS, self.core.nA, reset_to_zero_state=True)

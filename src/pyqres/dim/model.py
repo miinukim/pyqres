@@ -5,7 +5,7 @@ This module contains two closely related layers:
 1. a common reservoir-channel interface that turns a joint memory/readout
    unitary into an effective channel on the memory subsystem
 2. concrete Hamiltonian families that provide the unitary for a given scalar
-   input ``u``
+   input u
 
 The mathematical object consumed by the analysis code is the memory-channel PTM
 (Pauli transfer matrix). Everything in this module is organized around building
@@ -69,7 +69,7 @@ def _complex_normal_matrix(rng: np.random.Generator, shape: tuple[int, ...], sca
 class ReservoirBase:
     """Common reservoir-channel interface used by the PTM/Volterra analysis code.
 
-    A concrete subclass only needs to define how the joint unitary ``U(u)`` is constructed. This base class then:
+    A concrete subclass only needs to define how the joint unitary U(u) is constructed. This base class then:
 
     - converts that joint unitary into Kraus operators on the memory subsystem
     - applies the resulting memory channel to operators
@@ -84,8 +84,8 @@ class ReservoirBase:
         reset_to_zero_state: bool,
         cache_max_entries: int | None = 64,
     ) -> None:
-        # ``memory`` is the subsystem whose effective open dynamics we analyze.
-        # ``readout`` is reset after each step, which induces the effective memory channel.
+        # memory is the subsystem whose effective open dynamics we analyze.
+        # readout is reset after each step, which induces the effective memory channel.
         self.n_memory = n_memory
         self.n_readout = n_readout
         self.n_total = n_memory + n_readout
@@ -145,8 +145,8 @@ class ReservoirBase:
     ) -> tuple[int, ...]:
         """Convert logical input-site indices into joint-system site indices.
 
-        Older configs specify one site through ``input_site``. Newer encoding
-        sweeps can specify ``input_sites`` to drive the same scalar input through
+        Older configs specify one site through input_site. Newer encoding
+        sweeps can specify input_sites to drive the same scalar input through
         several qubits at once. The returned indices are physical sites in the
         joint memory+readout Hilbert space.
         """
@@ -286,7 +286,7 @@ class ReservoirBase:
             return cached
         kraus = self.kraus_operators(u)
         # First push every Pauli basis element through the channel in one batched contraction.
-        # ``outputs[n]`` is Phi_u(P_n), still represented as a dense memory operator.
+        # outputs[n] is Phi_u(P_n), still represented as a dense memory operator.
         outputs = np.einsum(
             "kab,nbc,kdc->nad",
             kraus,
@@ -317,7 +317,7 @@ class ReservoirBase:
         return R
 
     def parse_memory_observable(self, spec: str) -> np.ndarray:
-        # Accepted syntax is a product such as ``Z0*X2`` acting only on memory sites.
+        # Accepted syntax is a product such as Z0*X2 acting only on memory sites.
         cleaned = spec.replace(" ", "")
         if not cleaned:
             raise ValueError("Observable spec must be non-empty")
@@ -472,9 +472,9 @@ class IsingReservoirParameters:
     #
     #     V = input_strength * Z_{input_site}
     #
-    # by default, or the corresponding normalized sum over ``input_sites`` when
+    # by default, or the corresponding normalized sum over input_sites when
     # multi-qubit scalar encoding is requested. The selected sites act either on
-    # memory qubits or readout qubits depending on `input_on_memory`.
+    # memory qubits or readout qubits depending on input_on_memory.
     #
     # Parameter meanings in H(u):
     #
@@ -515,17 +515,17 @@ class IsingReservoirParameters:
     #     If False, it is applied to a readout qubit.
     #
     # - input_site:
-    #     Index of the qubit on which the input drive acts when `input_sites`
+    #     Index of the qubit on which the input drive acts when input_sites
     #     is not set.
     #
     # - input_sites:
     #     Optional list/tuple of qubit indices driven by the same scalar input.
-    #     For example, `[0, 1, 2]` uses V proportional to Z0 + Z1 + Z2.
+    #     For example, [0, 1, 2] uses V proportional to Z0 + Z1 + Z2.
     #
     # - input_strength_normalization:
     #     Controls how the per-site input strength is scaled for multi-site
-    #     encodings. `none` preserves the old per-site strength, `sqrt` keeps
-    #     the Frobenius scale roughly comparable, and `mean` keeps the summed
+    #     encodings. none preserves the old per-site strength, sqrt keeps
+    #     the Frobenius scale roughly comparable, and mean keeps the summed
     #     coefficient scale comparable.
     #
     # - periodic_memory_chain:
@@ -540,8 +540,8 @@ class IsingReservoirParameters:
 class IsingReservoirModel(ReservoirBase):
     """Single-step Ising reservoir with input-dependent Hamiltonian.
 
-    This is the simplest model in the package: one dense Hamiltonian ``H(u)``
-    generates one unitary step ``U(u) = exp(-i tau H(u))``.
+    This is the simplest model in the package: one dense Hamiltonian H(u)
+    generates one unitary step U(u) = exp(-i tau H(u)).
     """
 
     def __init__(self, params: IsingReservoirParameters):
@@ -687,7 +687,7 @@ class FloquetIsingReservoirBase(ReservoirBase):
         self._v = self._build_input_generator()
 
     def _build_diag_piece(self) -> np.ndarray:
-        # ``diag`` collects all Z-type terms that are diagonal in the computational basis.
+        # diag collects all Z-type terms that are diagonal in the computational basis.
         p = self.params
         H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
         for i in range(p.n_memory):
@@ -705,7 +705,7 @@ class FloquetIsingReservoirBase(ReservoirBase):
         return H
 
     def _build_mix_piece(self) -> np.ndarray:
-        # ``mix`` contains local X fields and intra-memory non-diagonal couplings.
+        # mix contains local X fields and intra-memory non-diagonal couplings.
         p = self.params
         H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
         for i in range(p.n_memory):
@@ -723,7 +723,7 @@ class FloquetIsingReservoirBase(ReservoirBase):
         return H
 
     def _build_coupling_piece(self) -> np.ndarray:
-        # ``couple`` contains the explicit memory-readout interaction terms.
+        # couple contains the explicit memory-readout interaction terms.
         p = self.params
         H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
         for i in range(p.n_memory):
@@ -833,22 +833,22 @@ class HaarRandomReservoirModel(ReservoirBase):
     single-qubit Haar-random SU(2) rotations followed by a brickwork pattern of
     nearest-neighbor CNOT gates across the full memory+readout register.
 
-    The scalar input ``u`` is not injected through the Hamiltonian. Instead, it
+    The scalar input u is not injected through the Hamiltonian. Instead, it
     is first mapped to a valid qubit-population parameter
 
         p(u) = clip(input_bias + input_scale * u, 0, 1),
 
-    then prepares a contiguous block of ``encoding_qubits`` readout qubits in the
+    then prepares a contiguous block of encoding_qubits readout qubits in the
     normalized GHZ-like state
 
         sqrt(p(u)) |0...0> + sqrt(1-p(u)) |1...1>,
 
-    starting at ``input_qubit``. Any remaining readout qubits are initialized in
-    the chosen ancilla state (currently only ``|0>`` is supported). After the
+    starting at input_qubit. Any remaining readout qubits are initialized in
+    the chosen ancilla state (currently only |0> is supported). After the
     fixed random circuit is applied, the readout subsystem is discarded exactly
     as in the other reservoir models. The affine map is convenient because the
     Volterra analysis in this repository expands the channel locally around
-    ``u = 0``.
+    u = 0.
     """
 
     def __init__(self, params: HaarRandomReservoirParameters):
@@ -1198,7 +1198,7 @@ class SYKReservoirModel(ReservoirBase):
                 if not (0 <= site < self.n_memory):
                     raise ValueError(f"Observable token '{token}' is out of range for n_memory={self.n_memory}")
                 # Number observables are multiplied directly, so strings like
-                # ``N0*N1`` become products of local occupation operators.
+                # N0*N1 become products of local occupation operators.
                 out = out @ self._number_ops_memory[site]
             return out
         return super().parse_memory_observable(spec)

@@ -28,11 +28,11 @@ from .linalg_utils import (
 
 FeatureLabel = Tuple[int, ...]
 # Example convention used in comments below:
-# - ``n_memory = 2`` so the traceless PTM sector has dimension ``4^2 - 1 = 15``
-# - ``observables = [Z0, Z1]`` so visible matrices have ``J = 2`` rows
-# - ``P = 2``, ``L = 1`` for the observable-side/dense truncation examples
-# - dense labels look like ``(1, 0)`` or ``(2, 0)`` in the polynomial-history basis
-# - observable-side labels look like ``(2, 0, 1)`` meaning:
+# - n_memory = 2 so the traceless PTM sector has dimension 4^2 - 1 = 15
+# - observables = [Z0, Z1] so visible matrices have J = 2 rows
+# - P = 2, L = 1 for the observable-side/dense truncation examples
+# - dense labels look like (1, 0) or (2, 0) in the polynomial-history basis
+# - observable-side labels look like (2, 0, 1) meaning:
 #   seed observable 2 -> one drift step -> one first-order insertion
 
 
@@ -72,21 +72,21 @@ class ReservoirModelProtocol(Protocol):
 class VolterraResult:
     """Container for the numerical diagnostics produced by one analysis run."""
 
-    # ``monomials`` is used generically for both analysis paths:
+    # monomials is used generically for both analysis paths:
     # - dense PTM path: polynomial-history labels for the truncated Volterra family
     # - observable-side path: one admissible operator word per retained basis vector
     monomials: List[FeatureLabel]
-    # ``latent_kernel_matrix`` is the raw spanning family before orthonormalization.
+    # latent_kernel_matrix is the raw spanning family before orthonormalization.
     # Its columns are PTM traceless coordinates in the dense path and flattened
     # operator columns in the observable-side path.
     latent_kernel_matrix: np.ndarray
-    # ``latent_basis_matrix`` is an orthonormal basis for the span used by
+    # latent_basis_matrix is an orthonormal basis for the span used by
     # restricted readout and principal-angle diagnostics.
     latent_basis_matrix: np.ndarray
-    # ``restricted_measurement_matrix`` is the ``O_{P,L}`` object: the
+    # restricted_measurement_matrix is the O_{P,L} object: the
     # readout map restricted to an orthonormal basis of the relevant span.
     restricted_measurement_matrix: np.ndarray
-    # ``visible_coefficient_matrix`` is the kernel-side matrix used for hard OVD.
+    # visible_coefficient_matrix is the kernel-side matrix used for hard OVD.
     # In the main analyzer we identify it with the restricted matrix because the
     # Volterra sector is already constructed directly on the observable side.
     visible_coefficient_matrix: np.ndarray
@@ -125,11 +125,11 @@ class PTMAffineExpansion:
 
     def _compute(self) -> None:
         T0 = self.model.ptm(self.expansion_point)
-        # Example: for ``n_memory = 2``, ``T0.shape == (16, 16)`` and the
-        # traceless block ``T0[1:, 1:]`` has shape ``(15, 15)``.
+        # Example: for n_memory = 2, T0.shape == (16, 16) and the
+        # traceless block T0[1:, 1:] has shape (15, 15).
         rho = np.eye(self.model.dim_memory, dtype=complex) / self.model.dim_memory
-        # Example initial state for ``n_memory = 2``:
-        # ``rho = I_4 / 4 = diag(0.25, 0.25, 0.25, 0.25)``.
+        # Example initial state for n_memory = 2:
+        # rho = I_4 / 4 = diag(0.25, 0.25, 0.25, 0.25).
         # Iterate to find the fixed point
         fp_max_iter = 10000
         for _ in range(fp_max_iter):
@@ -156,15 +156,15 @@ class PTMAffineExpansion:
         b_samples = []
         for point in self.points:
             u = self.expansion_point + point * self.fd_step
-            # Example with ``fd_step = 5e-3`` and ``points = [-3, ..., 3]``:
-            # sampled inputs are ``-0.015, -0.010, ..., 0.015`` around ``u0 = 0``.
+            # Example with fd_step = 5e-3 and points = [-3, ..., 3]:
+            # sampled inputs are -0.015, -0.010, ..., 0.015 around u0 = 0.
             T = self.model.ptm(u)
             self.T_samples[point] = T
             A_u = T[1:, 1:]
             c_u = T[1:, 0]
             b_u = c_u + A_u @ self.xbar_tr - self.xbar_tr
-            # Example shapes for ``n_memory = 2``:
-            # ``A_u.shape == (15, 15)``, ``c_u.shape == (15,)``, ``b_u.shape == (15,)``.
+            # Example shapes for n_memory = 2:
+            # A_u.shape == (15, 15), c_u.shape == (15,), b_u.shape == (15,).
             A_samples.append(A_u)
             b_samples.append(b_u)
 
@@ -203,7 +203,7 @@ class TruncatedVolterraGenerator:
     def generate(self, tol: float = 1e-10) -> Tuple[List[FeatureLabel], np.ndarray]:
         # Initialize with zero monomial
         zero = (0,) * (self.lag_horizon + 1)
-        # Example with ``L = 2``: ``zero == (0, 0, 0)``.
+        # Example with L = 2: zero == (0, 0, 0).
         state: Dict[FeatureLabel, np.ndarray] = {zero: np.zeros(self.dim_tr, dtype=complex)}
 
         for _ in range(self.lag_horizon + 1):
@@ -211,7 +211,7 @@ class TruncatedVolterraGenerator:
             # Shift old monomials one lag deeper
             for monomial, coeff in state.items():
                 new_monomial = (0,) + monomial[:-1]
-                # Example: ``(1, 0, 0)`` becomes ``(0, 1, 0)`` after one lag shift.
+                # Example: (1, 0, 0) becomes (0, 1, 0) after one lag shift.
                 shifted[new_monomial] = shifted.get(new_monomial, 0) + coeff
 
             new_state: Dict[FeatureLabel, np.ndarray] = {}
@@ -225,16 +225,16 @@ class TruncatedVolterraGenerator:
                         contrib = self.expansion.A0 @ coeff
                     else:
                         contrib = (self.expansion.Ak(k) @ coeff) / factorial(k)
-                    # Example: if ``monomial == (0, 1, 0)`` and ``k == 2``,
-                    # then ``beta_t == (2, 1, 0)`` and the contribution uses
-                    # ``A_2 / 2!`` on the old coefficient vector.
+                    # Example: if monomial == (0, 1, 0) and k == 2,
+                    # then beta_t == (2, 1, 0) and the contribution uses
+                    # A_2 / 2! on the old coefficient vector.
                     new_state[beta_t] = new_state.get(beta_t, 0) + contrib
 
             for k in range(1, self.max_order + 1):
                 monomial = (k,) + (0,) * self.lag_horizon
                 contrib = self.expansion.bk(k) / factorial(k)
-                # Example with ``L = 2``:
-                # ``k = 1`` seeds ``(1, 0, 0)``, ``k = 2`` seeds ``(2, 0, 0)``.
+                # Example with L = 2:
+                # k = 1 seeds (1, 0, 0), k = 2 seeds (2, 0, 0).
                 new_state[monomial] = new_state.get(monomial, 0) + contrib
 
             pruned: Dict[FeatureLabel, np.ndarray] = {}
@@ -246,9 +246,9 @@ class TruncatedVolterraGenerator:
         monomials = sorted(state.keys(), key=lambda label: (sum(label), label))
         active = [label for label in monomials if sum(label) > 0 and np.linalg.norm(state[label]) > tol]
         columns = [state[label] for label in active]
-        # Example: ``active`` might look like
-        # ``[(1, 0, 0), (0, 1, 0), (2, 0, 0), (1, 1, 0)]`` and
-        # ``K.shape == (15, 4)`` for the toy ``n_memory = 2`` case.
+        # Example: active might look like
+        # [(1, 0, 0), (0, 1, 0), (2, 0, 0), (1, 1, 0)] and
+        # K.shape == (15, 4) for the toy n_memory = 2 case.
         K = np.column_stack(columns) if columns else np.zeros((self.dim_tr, 0), dtype=complex)
         return active, K
 
@@ -263,8 +263,8 @@ class _ObservableWordState:
 
 
 def _noise_threshold(n_shots: int, delta: float, noise_scale: float) -> float:
-    # Example: ``n_shots = 2000``, ``delta = 0.05``, ``noise_scale = 1`` gives
-    # ``tau ~= sqrt(log(20) / 2000) ~= 0.0387``.
+    # Example: n_shots = 2000, delta = 0.05, noise_scale = 1 gives
+    # tau ~= sqrt(log(20) / 2000) ~= 0.0387.
     return float(noise_scale * np.sqrt(np.log(max(2.0, 1.0 / delta)) / max(1, n_shots)))
 
 
@@ -279,7 +279,7 @@ def _empty_result(
     latent_basis = np.zeros((latent_kernel_matrix.shape[0], 0), dtype=complex)
     restricted = np.zeros((n_visible, 0), dtype=complex)
     # Example empty shapes:
-    # ``latent_kernel_matrix.shape == (15, 0)`` and ``restricted.shape == (2, 0)``.
+    # latent_kernel_matrix.shape == (15, 0) and restricted.shape == (2, 0).
     return VolterraResult(
         monomials=monomials,
         latent_kernel_matrix=latent_kernel_matrix,
@@ -301,8 +301,8 @@ def _ambient_readout_matrix(observables: Sequence[np.ndarray]) -> np.ndarray:
         return np.zeros((0, 0), dtype=complex)
     # Flatten operators in Hilbert-Schmidt geometry so the nullspace calculation
     # can be performed with ordinary linear algebra in the ambient operator space.
-    # Example with two 4x4 observables ``Z0`` and ``Z1``:
-    # returns a matrix with shape ``(2, 16)``.
+    # Example with two 4x4 observables Z0 and Z1:
+    # returns a matrix with shape (2, 16).
     return ensure_finite(
         "ambient readout matrix",
         np.vstack([np.asarray(observable, dtype=complex).reshape(1, -1).conj() for observable in observables]),
@@ -327,9 +327,9 @@ def _finalize_result(
     restricted_measurement_matrix = ensure_finite("restricted measurement matrix", restricted_measurement_matrix)
     visible_coefficient_matrix = ensure_finite("visible coefficient matrix", visible_coefficient_matrix)
     # Example shapes in one small run:
-    # ``latent_basis_matrix.shape == (15, 6)``
-    # ``restricted_measurement_matrix.shape == (2, 6)``
-    # ``visible_coefficient_matrix.shape == (2, 9)``.
+    # latent_basis_matrix.shape == (15, 6)
+    # restricted_measurement_matrix.shape == (2, 6)
+    # visible_coefficient_matrix.shape == (2, 9).
 
     # Hard OVD is defined on the singular spectrum of the kernel-side visible matrix.
     singular_values = ensure_finite(
@@ -341,9 +341,9 @@ def _finalize_result(
         la.svdvals(restricted_measurement_matrix) if restricted_measurement_matrix.size else np.array([], dtype=float),
     )
     # Example singular spectra:
-    # ``singular_values = [0.12, 0.03]``.
+    # singular_values = [0.12, 0.03].
 
-    # ``VVR`` is defined algebraically on the visible image. In exact arithmetic
+    # VVR is defined algebraically on the visible image. In exact arithmetic
     # this is just the rank of the visible coefficient matrix.
     vvr = matrix_rank(visible_coefficient_matrix, tol=algebraic_tol)
     ovd = int(np.sum(np.real_if_close(singular_values) > 2.0 * noise_threshold))
@@ -351,8 +351,8 @@ def _finalize_result(
         "principal angles",
         np.degrees(principal_angles(latent_basis_matrix, readout_nullspace_matrix)),
     )
-    # Example: if ``tau = 0.04`` and ``singular_values = [0.12, 0.03]``,
-    # then ``ovd = 1`` because only ``0.12 > 2 * 0.04``.
+    # Example: if tau = 0.04 and singular_values = [0.12, 0.03],
+    # then ovd = 1 because only 0.12 > 2 * 0.04.
 
     return VolterraResult(
         monomials=monomials,
@@ -410,7 +410,7 @@ class DenseVolterraAnalyzer:
         monomials, K = self.generator.generate(tol=self.algebraic_tol)
         ensure_finite("latent kernel matrix", K)
         # Example dense output:
-        # ``monomials = [(1, 0), (0, 1), (2, 0), (1, 1)]``, ``K.shape = (15, 4)``.
+        # monomials = [(1, 0), (0, 1), (2, 0), (1, 1)], K.shape = (15, 4).
 
         tau = _noise_threshold(n_shots=n_shots, delta=delta, noise_scale=noise_scale)
 
@@ -418,15 +418,15 @@ class DenseVolterraAnalyzer:
             empty_latent = np.zeros((self.model.dim_memory**2 - 1, 0), dtype=complex)
             return _empty_result(monomials, empty_latent, len(self.observables), tau)
 
-        # ``K`` is only a spanning family; QR produces the orthonormal basis needed
-        # for the restricted matrix ``O_{P,L}`` and for principal-angle geometry.
+        # K is only a spanning family; QR produces the orthonormal basis needed
+        # for the restricted matrix O_{P,L} and for principal-angle geometry.
         latent_basis = orthonormal_basis_from_columns(K, tol=self.algebraic_tol)
         readout = self.model.readout_matrix(self.observables)
         ensure_finite("readout matrix", readout)
-        # Example shapes for ``n_memory = 2``, two observables:
-        # ``latent_basis.shape == (15, r)``, ``readout.shape == (2, 15)``.
+        # Example shapes for n_memory = 2, two observables:
+        # latent_basis.shape == (15, r), readout.shape == (2, 15).
 
-        # ``readout_matrix`` stores tr(M_j P_mu) / d_M, while the paper's visible
+        # readout_matrix stores tr(M_j P_mu) / d_M, while the paper's visible
         # matrices use the raw readout map X -> tr(M_j X). Multiply back by d_M.
         visible_coefficient = ensure_finite(
             "visible coefficient matrix",
@@ -438,7 +438,7 @@ class DenseVolterraAnalyzer:
         )
         readout_nullspace = null_space(readout, tol=self.algebraic_tol)
         # Example:
-        # ``visible_coefficient.shape == (2, 4)``, ``restricted.shape == (2, r)``.
+        # visible_coefficient.shape == (2, 4), restricted.shape == (2, r).
 
         return _finalize_result(
             monomials=monomials,
@@ -453,15 +453,15 @@ class DenseVolterraAnalyzer:
 
 
 class ObservableVolterraBasisBuilder:
-    """Generate the exact ``(P, L)``-truncated observable-side Volterra sector.
+    """Generate the exact (P, L)-truncated observable-side Volterra sector.
 
-    The generated span is the paper's observable-side sector
+    The generated span is the observable-side sector
 
-    ``span((Phi_0^*)^m_p M_qp ... M_q1 (Phi_0^*)^m_0(O))``
+    span((Phi_0^*)^m_p M_qp ... M_q1 (Phi_0^*)^m_0(O))
 
-    with total insertion order at most ``P`` and total drift count at most ``L``.
-    The internal word labels encode one zero-input drift by ``0`` and an input
-    insertion of order ``q`` by the integer ``q``. The leading entry identifies
+    with total insertion order at most P and total drift count at most L.
+    The internal word labels encode one zero-input drift by 0 and an input
+    insertion of order q by the integer q. The leading entry identifies
     the seed observable index (1-based).
     """
 
@@ -493,8 +493,8 @@ class ObservableVolterraBasisBuilder:
         stack: List[_ObservableWordState] = []
 
         for seed_index, observable in enumerate(self.seed_observables):
-            # Example seed states for ``observables = [Z0, Z1]``:
-            # first push ``(seed_index=0, word=())``, then ``(seed_index=1, word=())``.
+            # Example seed states for observables = [Z0, Z1]:
+            # first push (seed_index=0, word=()), then (seed_index=1, word=()).
             stack.append(
                 _ObservableWordState(
                     operator=np.asarray(observable, dtype=complex),
@@ -508,8 +508,8 @@ class ObservableVolterraBasisBuilder:
         while stack:
             state = stack.pop()
             # Example popped state:
-            # ``seed_index = 1``, ``total_order = 1``, ``total_drift = 1``,
-            # ``word = (0, 1)`` means "start from observable 2, drift once, insert once".
+            # seed_index = 1, total_order = 1, total_drift = 1,
+            # word = (0, 1) means "start from observable 2, drift once, insert once".
             if state.total_order > 0:
                 # Only retain words with at least one insertion. Pure drift words
                 # correspond to the order-zero background/readout sector, whereas
@@ -518,14 +518,14 @@ class ObservableVolterraBasisBuilder:
                 if orth is not None:
                     basis.append(orth)
                     labels.append((state.seed_index + 1, *state.word))
-                    # Example stored label: ``(2, 0, 1)``.
+                    # Example stored label: (2, 0, 1).
                     if self.max_basis_size is not None and len(basis) >= self.max_basis_size:
                         break
 
             if state.total_drift < self.lag_horizon:
-                # Appending ``0`` to the word means "apply one more zero-input
+                # Appending 0 to the word means "apply one more zero-input
                 # adjoint step". Enumerating these steps explicitly makes the code
-                # follow the paper's ``sum m_j <= L`` truncation literally.
+                # follow the paper's sum m_j <= L truncation literally.
                 stack.append(
                     _ObservableWordState(
                         operator=self.model.channel_adjoint(self.expansion_point, state.operator),
@@ -535,12 +535,12 @@ class ObservableVolterraBasisBuilder:
                         word=state.word + (0,),
                     )
                 )
-                # Example: ``word = (1,)`` becomes ``(1, 0)`` after one extra drift.
+                # Example: word = (1,) becomes (1, 0) after one extra drift.
 
             remaining_order = self.max_order - state.total_order
             for q in range(remaining_order, 0, -1):
-                # Appending ``q`` means "apply the q-th insertion superoperator".
-                # The finite-difference derivative implements the paper's ``M_q``
+                # Appending q means "apply the q-th insertion superoperator".
+                # The finite-difference derivative implements the paper's M_q
                 # without ever building a dense PTM/Liouville matrix.
                 stack.append(
                     _ObservableWordState(
@@ -557,8 +557,8 @@ class ObservableVolterraBasisBuilder:
                         word=state.word + (q,),
                     )
                 )
-                # Example with ``remaining_order = 2``:
-                # from ``word = (0,)`` we enqueue ``(0, 2)`` and ``(0, 1)``.
+                # Example with remaining_order = 2:
+                # from word = (0,) we enqueue (0, 2) and (0, 1).
 
         return labels, basis
 
@@ -600,11 +600,11 @@ class VolterraAnalyzer:
         out = np.zeros((len(self.observables), len(basis_ops)), dtype=complex)
         for j, observable in enumerate(self.observables):
             for ell, basis_op in enumerate(basis_ops):
-                # Each entry is the raw readout functional ``tr(M_j H_ell)`` in
+                # Each entry is the raw readout functional tr(M_j H_ell) in
                 # Hilbert-Schmidt form, matching the paper's observable-side matrix.
                 out[j, ell] = hs_inner_product(observable, basis_op)
-                # Example: ``out[0, 3]`` is the overlap between observable ``Z0``
-                # and observable-side basis operator ``H_3``.
+                # Example: out[0, 3] is the overlap between observable Z0
+                # and observable-side basis operator H_3.
         return ensure_finite("restricted measurement matrix", out)
 
     def analyze(
@@ -615,7 +615,7 @@ class VolterraAnalyzer:
     ) -> VolterraResult:
         monomials, basis_ops = self.builder.build()
         # Example observable-side output:
-        # ``monomials = [(2, 1), (2, 0, 1), (1, 2)]`` and ``len(basis_ops) == 3``.
+        # monomials = [(2, 1), (2, 0, 1), (1, 2)] and len(basis_ops) == 3.
         tau = _noise_threshold(n_shots=n_shots, delta=delta, noise_scale=noise_scale)
 
         if not basis_ops:
@@ -627,8 +627,8 @@ class VolterraAnalyzer:
         # flattening it gives both the ambient-space basis for angle diagnostics
         # and the latent-basis matrix consumed by the shared evaluation layer.
         latent_columns = np.column_stack([np.asarray(op, dtype=complex).reshape(-1) for op in basis_ops])
-        # Example shapes with ``n_memory = 2`` and 3 observable-side basis operators:
-        # ``restricted.shape == (2, 3)``, ``latent_columns.shape == (16, 3)``.
+        # Example shapes with n_memory = 2 and 3 observable-side basis operators:
+        # restricted.shape == (2, 3), latent_columns.shape == (16, 3).
         readout_nullspace = null_space(_ambient_readout_matrix(self.observables), tol=self.algebraic_tol)
 
         # In the observable-side methodology the orthonormalized basis itself is the

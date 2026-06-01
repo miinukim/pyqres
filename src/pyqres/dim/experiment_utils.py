@@ -5,9 +5,9 @@ from __future__ import annotations
 The goal of this module is not to replace custom experiment scripts. It covers
 the common case where an experiment:
 
-1. reads a Hydra config with ``sweep`` and ``experiment`` sections
-2. builds models through ``build_sweep(...)``
-3. runs ``VolterraAnalyzer`` on each sweep value
+1. reads a Hydra config with sweep and experiment sections
+2. builds models through build_sweep(...)
+3. runs VolterraAnalyzer on each sweep value
 4. stores a standard row schema with the main pyqres diagnostics
 5. saves a CSV, resolved config, and a small number of line plots
 
@@ -49,7 +49,7 @@ class LineMetricSpec:
 
 
 def sweep_values_from_cfg(cfg: DictConfig) -> np.ndarray:
-    """Build a simple linspace sweep from ``cfg.sweep.grid``."""
+    """Build a simple linspace sweep from cfg.sweep.grid."""
 
     grid = cfg.sweep.grid
     return np.linspace(float(grid.start), float(grid.stop), int(grid.num))
@@ -96,7 +96,7 @@ def _random_pauli_observable_specs(
     pool: list[str] = []
     for word in product(("I", *_PAULIS), repeat=n_memory):
         # The pool is built from Pauli words and then converted to compact specs
-        # such as `X0*Z2`. Identity-only words are not valid observables here.
+        # such as X0*Z2. Identity-only words are not valid observables here.
         locality = sum(pauli != "I" for pauli in word)
         if locality == 0:
             continue
@@ -141,7 +141,7 @@ def _standard_analysis_row(
     observable_specs: Sequence[str],
     result: VolterraResult,
 ) -> dict[str, Any]:
-    """Flatten a successful `VolterraResult` into one CSV-friendly row."""
+    """Flatten a successful VolterraResult into one CSV-friendly row."""
 
     angles = np.array(result.principal_angles_deg, dtype=float)
     return {
@@ -214,7 +214,7 @@ def run_standard_analysis_sweep(
 
     This collapses the repetitive experiment pattern
 
-    ``build_sweep -> build model -> choose observables -> build analyzer -> analyze``
+    build_sweep -> build model -> choose observables -> build analyzer -> analyze
 
     into one helper call. Callers can still extend each successful or failed row
     by passing small callback functions instead of rewriting the entire loop.

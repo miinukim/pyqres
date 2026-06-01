@@ -1,6 +1,6 @@
 """Dense exact quantum reservoir core.
 
-This module is the numerical center of `pyqres.simulation`. It constructs dense
+This module is the numerical center of pyqres.simulation. It constructs dense
 Hamiltonians/unitaries for small QRC systems, applies ancilla measurement
 protocols exactly through Kraus operators, and exposes reduced memory channels
 for both task-side reservoirs and PTM/dimension analysis.
@@ -122,7 +122,7 @@ def _embed_local_unitary(n_qubits: int, targets: Sequence[int], local_unitary: n
 
 
 def _statevector_to_preparation_unitary(statevector: np.ndarray) -> np.ndarray:
-    """Build a unitary whose first column prepares `statevector` from |0...0>."""
+    """Build a unitary whose first column prepares statevector from |0...0>."""
 
     vec = np.asarray(statevector, dtype=complex).reshape(-1)
     norm = float(np.linalg.norm(vec))
@@ -178,7 +178,7 @@ class ExactQRCModelConfig:
 
     The scalar input can enter as Hamiltonian modulation, amplitude preparation,
     or a user-provided unitary. Measurement behavior is delegated to
-    `MeasurementControlConfig` so the same control semantics can be shared with
+    MeasurementControlConfig so the same control semantics can be shared with
     frontends and analysis wrappers.
     """
 
@@ -312,7 +312,7 @@ class ExactQRCModel:
     def _build_h0_h1(self) -> tuple[np.ndarray, np.ndarray]:
         """Build fixed and input-modulated Hamiltonian components.
 
-        `H0` contains transverse fields plus ZZ couplings. `H1` contains the
+        H0 contains transverse fields plus ZZ couplings. H1 contains the
         longitudinal Z field that is scaled by the scalar input under
         Hamiltonian encoding.
         """
@@ -426,7 +426,7 @@ class ExactQRCModel:
         return _embed_local_unitary(self.n, targets, local)
 
     def unitary(self, u: float) -> np.ndarray:
-        """Return the joint evolution unitary for scalar input `u`."""
+        """Return the joint evolution unitary for scalar input u."""
 
         key = float(u)
         cached = self._unitary_cache.get(key)

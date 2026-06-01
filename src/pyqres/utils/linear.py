@@ -8,7 +8,7 @@ def ridge_regression_fit(X: np.ndarray, y: np.ndarray, l2: float) -> np.ndarray:
 
     The first column is treated as an intercept/bias term by convention and is
     not regularized. Reservoir features in this package generally include that
-    column explicitly when `include_bias=True`.
+    column explicitly when include_bias=True.
     """
 
     if y.ndim == 1:

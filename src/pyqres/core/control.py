@@ -23,8 +23,8 @@ ConditionRule = Literal["nonzero", "all_one"]
 class MeasurementControlConfig:
     """Configuration for the post-evolution measurement/control step.
 
-    `measurement_mode` chooses projective versus weak ancilla measurement.
-    `post_measurement_mode` controls whether the ancilla is reset to |0...0>
+    measurement_mode chooses projective versus weak ancilla measurement.
+    post_measurement_mode controls whether the ancilla is reset to |0...0>
     after the branch mixture is formed. The conditioned-gate fields implement a
     simple output feedback rule keyed by the classical measurement outcome.
     """

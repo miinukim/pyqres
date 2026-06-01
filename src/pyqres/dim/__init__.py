@@ -33,9 +33,10 @@ except Exception:  # pragma: no cover
     ExactQRCModelConfig = None  # type: ignore
     QRCLibExactReservoirModel = None  # type: ignore
 try:  # pragma: no cover
-    from .streaming import SharedExactStreamingReservoir
+    from .streaming import MemoryObservableStreamingReservoir, SharedExactStreamingReservoir
 except Exception:  # pragma: no cover
     # Streaming depends on the same external backend and should fail soft as well.
+    MemoryObservableStreamingReservoir = None  # type: ignore
     SharedExactStreamingReservoir = None  # type: ignore
 try:  # pragma: no cover
     from .sweep import ConfigurableSweep, SweepExperiment, build_sweep
@@ -82,6 +83,7 @@ __all__ = [
     "SYKReservoirModel",
     "SYKReservoirParameters",
     "QRCLibExactReservoirModel",
+    "MemoryObservableStreamingReservoir",
     "SharedExactStreamingReservoir",
     "ExactQRCModel",
     "ExactQRCModelConfig",

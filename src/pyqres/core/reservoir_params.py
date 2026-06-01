@@ -1,16 +1,16 @@
 """Parameter-generation helpers for reservoir Hamiltonians.
 
-`ReservoirParams` supports three levels of Hamiltonian specification:
+ReservoirParams supports three levels of Hamiltonian specification:
 
 1. the built-in Ising-type preset used by the original QRC experiments
-2. explicit matrix-like `H0`/`H1` objects, including NumPy arrays, SciPy
+2. explicit matrix-like H0/H1 objects, including NumPy arrays, SciPy
    sparse matrices, and Qiskit quantum-info operators
 3. explicit Pauli-term lists, which can stay symbolic until a backend chooses a
    concrete representation
 
-The simulation core evolves Hamiltonian inputs as `H(u) = H0 + input_scale*u*H1`.
-For historical configs, the Ising preset still also returns `hx0_vec`,
-`hz1_vec`, and `J_mat`.
+The simulation core evolves Hamiltonian inputs as H(u) = H0 + input_scale*u*H1.
+For historical configs, the Ising preset still also returns hx0_vec,
+hz1_vec, and J_mat.
 """
 
 from __future__ import annotations
@@ -33,12 +33,12 @@ PAULI_1Q = {
 class PauliTerm:
     """One term in a dense Pauli Hamiltonian.
 
-    `operators` is a sequence of `(site, pauli)` pairs. Sites are indexed in the
+    operators is a sequence of (site, pauli) pairs. Sites are indexed in the
     joint system+ancilla register. Example:
 
-    ```python
+    python
     PauliTerm(0.7, ((0, "Z"), (2, "Z")))  # 0.7 * Z0 Z2
-    ```
+    
     """
 
     coefficient: complex
@@ -53,7 +53,7 @@ def _kron_all(ops: Sequence[np.ndarray]) -> np.ndarray:
 
 
 def normalize_pauli_term(term: PauliTerm | tuple[Any, Any] | Mapping[str, Any]) -> PauliTerm:
-    """Accept PauliTerm, tuple, or dict input and normalize to `PauliTerm`."""
+    """Accept PauliTerm, tuple, or dict input and normalize to PauliTerm."""
 
     if isinstance(term, PauliTerm):
         return term
@@ -66,7 +66,7 @@ def normalize_pauli_term(term: PauliTerm | tuple[Any, Any] | Mapping[str, Any]) 
 
 
 def pauli_term_matrix(n_qubits: int, term: PauliTerm | tuple[Any, Any] | Mapping[str, Any]) -> np.ndarray:
-    """Convert one Pauli term into a dense matrix on `n_qubits`."""
+    """Convert one Pauli term into a dense matrix on n_qubits."""
 
     normalized = normalize_pauli_term(term)
     labels = ["I"] * int(n_qubits)
@@ -97,7 +97,7 @@ def pauli_terms_to_labels(
     n_qubits: int,
     terms: Sequence[PauliTerm | tuple[Any, Any] | Mapping[str, Any]],
 ) -> tuple[tuple[str, complex], ...]:
-    """Normalize Pauli terms into `(label, coefficient)` pairs.
+    """Normalize Pauli terms into (label, coefficient) pairs.
 
     Qubit labels follow the same left-to-right convention used by the dense
     Kronecker construction in this module and by Qiskit's Pauli string display.
@@ -122,7 +122,7 @@ def pauli_terms_to_sparse_pauli_op(
     n_qubits: int,
     terms: Sequence[PauliTerm | tuple[Any, Any] | Mapping[str, Any]],
 ) -> Any:
-    """Convert Pauli terms to Qiskit's `SparsePauliOp` without importing Qiskit globally."""
+    """Convert Pauli terms to Qiskit's SparsePauliOp without importing Qiskit globally."""
 
     try:
         from qiskit.quantum_info import SparsePauliOp
@@ -140,8 +140,8 @@ def dense_hamiltonian_matrix(matrix_like: Any) -> np.ndarray:
 
     The core package should not require optional simulation backends, so this
     helper intentionally uses duck typing. It accepts regular arrays, SciPy
-    sparse matrices via `toarray`, and Qiskit quantum-info objects such as
-    `Operator`/`SparsePauliOp` via `to_matrix` or `data`.
+    sparse matrices via toarray, and Qiskit quantum-info objects such as
+    Operator/SparsePauliOp via to_matrix or data.
     """
 
     if hasattr(matrix_like, "to_dense") and callable(matrix_like.to_dense):
@@ -149,14 +149,14 @@ def dense_hamiltonian_matrix(matrix_like: Any) -> np.ndarray:
 
     candidate = matrix_like
 
-    # Qiskit quantum-info classes expose `to_matrix`; SparsePauliOp and Operator
+    # Qiskit quantum-info classes expose to_matrix; SparsePauliOp and Operator
     # both fit this branch. Some implementations return sparse matrices, so a
-    # later normalization pass still checks for `toarray`.
+    # later normalization pass still checks for toarray.
     if hasattr(candidate, "to_matrix") and callable(candidate.to_matrix):
         candidate = candidate.to_matrix()
 
-    # A few operator wrappers expose `to_operator()` instead of a direct dense
-    # conversion. Convert once and then use either `.data` or `.to_matrix()`.
+    # A few operator wrappers expose to_operator() instead of a direct dense
+    # conversion. Convert once and then use either .data or .to_matrix().
     elif hasattr(candidate, "to_operator") and callable(candidate.to_operator):
         operator = candidate.to_operator()
         if hasattr(operator, "data"):
@@ -164,15 +164,15 @@ def dense_hamiltonian_matrix(matrix_like: Any) -> np.ndarray:
         elif hasattr(operator, "to_matrix") and callable(operator.to_matrix):
             candidate = operator.to_matrix()
 
-    # SciPy sparse matrices and sparse arrays expose `toarray`. Prefer this over
-    # `np.asarray`, which would otherwise create an object array around them.
+    # SciPy sparse matrices and sparse arrays expose toarray. Prefer this over
+    # np.asarray, which would otherwise create an object array around them.
     if hasattr(candidate, "toarray") and callable(candidate.toarray):
         candidate = candidate.toarray()
     elif hasattr(candidate, "todense") and callable(candidate.todense):
         candidate = candidate.todense()
     elif hasattr(candidate, "data") and not isinstance(candidate, np.ndarray):
         # Qiskit Operator.data lands here if the object did not have
-        # `to_matrix`; avoid applying this to ndarray, whose `.data` is a buffer.
+        # to_matrix; avoid applying this to ndarray, whose .data is a buffer.
         data = candidate.data
         if isinstance(data, np.ndarray):
             candidate = data
@@ -188,7 +188,7 @@ class HamiltonianSpec:
     """Backend-neutral Hamiltonian component.
 
     The spec preserves symbolic Pauli data for Qiskit/Aer-style backends while
-    still giving dense exact simulation a single `to_dense()` conversion point.
+    still giving dense exact simulation a single to_dense() conversion point.
     """
 
     kind: str
@@ -225,7 +225,7 @@ class HamiltonianSpec:
         return dense_hamiltonian_matrix(self.data)
 
     def to_sparse_pauli_op(self) -> Any:
-        """Materialize this Hamiltonian as Qiskit's `SparsePauliOp` when possible."""
+        """Materialize this Hamiltonian as Qiskit's SparsePauliOp when possible."""
 
         if self.data is None and not self.terms:
             return pauli_terms_to_sparse_pauli_op(self.n_qubits, ())
@@ -247,13 +247,13 @@ class ReservoirParams:
     """Hamiltonian parameter generation for simulation reservoirs.
 
     The Ising-type preset produces explicit vectors/matrices:
-    transverse fields `hx0_vec`, input-modulated longitudinal fields `hz1_vec`,
-    and nearest-neighbor open-boundary ZZ couplings `J_mat`. This dataclass
+    transverse fields hx0_vec, input-modulated longitudinal fields hz1_vec,
+    and nearest-neighbor open-boundary ZZ couplings J_mat. This dataclass
     provides reproducible defaults so experiments can be described compactly.
 
-    For broader Hamiltonians, set `hamiltonian_kind="matrix"` and provide
-    `h0_matrix`/`h1_matrix`, or set `hamiltonian_kind="pauli_terms"` and provide
-    `h0_terms`/`h1_terms`.
+    For broader Hamiltonians, set hamiltonian_kind="matrix" and provide
+    h0_matrix/h1_matrix, or set hamiltonian_kind="pauli_terms" and provide
+    h0_terms/h1_terms.
     """
 
     n_system: int = 6
@@ -295,7 +295,7 @@ class ReservoirParams:
     ) -> "ReservoirParams":
         """Create a matrix-like Hamiltonian specification.
 
-        `h0_matrix` and `h1_matrix` may be NumPy arrays, SciPy sparse matrices,
+        h0_matrix and h1_matrix may be NumPy arrays, SciPy sparse matrices,
         or Qiskit quantum-info operators. They are wrapped without densifying so
         downstream backends can choose dense, sparse, or Qiskit-native execution.
         """
@@ -401,8 +401,8 @@ class ReservoirParams:
     def generate(self) -> dict:
         """Generate Hamiltonian parameters and backend-neutral Hamiltonian specs.
 
-        `J_mat` stores only the upper-triangular couplings because downstream
-        Hamiltonian construction iterates over `i < j`. Keeping the lower
+        J_mat stores only the upper-triangular couplings because downstream
+        Hamiltonian construction iterates over i < j. Keeping the lower
         triangle zero also makes serialized configs easier to inspect.
         """
 

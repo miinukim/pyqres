@@ -3,6 +3,7 @@
 from pyqres.dim import (
     ConfigurableSweep,
     LineMetricSpec,
+    MemoryObservableStreamingReservoir,
     SweepExperiment,
     build_sweep,
     run_standard_analysis_sweep,
@@ -14,6 +15,7 @@ from pyqres.dim import (
 __all__ = [
     "ConfigurableSweep",
     "LineMetricSpec",
+    "MemoryObservableStreamingReservoir",
     "SweepExperiment",
     "build_sweep",
     "run_standard_analysis_sweep",

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 The utilities here construct the finite-dimensional objects used by the
 operator-isotropy experiments. Given an orthonormalized or raw latent basis
-``Q_gamma`` and a readout matrix ``R``, they compute
+Q_gamma and a readout matrix R, they compute
 
-``B_gamma = Q_gamma^* P_vis Q_gamma``
+B_gamma = Q_gamma^* P_vis Q_gamma
 
-and its supported restriction ``B_gamma_plus`` after removing exact-null
-directions. The eigenvalues of these matrices are ``sin^2(theta_j)`` for the
+and its supported restriction B_gamma_plus after removing exact-null
+directions. The eigenvalues of these matrices are sin^2(theta_j) for the
 full and supported visibility angles.
 """
 
@@ -51,7 +51,7 @@ def _max_offdiag_row_sum(matrix: np.ndarray) -> float:
 
 
 def _orth_projector(basis: np.ndarray, ambient_dim: int) -> np.ndarray:
-    """Construct the orthogonal projector onto the span of `basis` columns."""
+    """Construct the orthogonal projector onto the span of basis columns."""
 
     if basis.size == 0 or basis.shape[1] == 0:
         return np.zeros((ambient_dim, ambient_dim), dtype=complex)
@@ -194,7 +194,7 @@ def compressed_visibility_diagnostics(
     *,
     tol: float = 1e-10,
 ) -> CompressedVisibilityDiagnostics:
-    """Construct ``B_gamma``, ``B_gamma_plus``, and their isotropy metrics."""
+    """Construct B_gamma, B_gamma_plus, and their isotropy metrics."""
 
     q_gamma = orthonormal_basis_from_columns(np.asarray(latent_basis, dtype=complex), tol=tol)
     s_gamma = int(q_gamma.shape[1])

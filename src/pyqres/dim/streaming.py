@@ -7,6 +7,7 @@ from typing import List, Sequence
 
 import numpy as np
 
+from .linalg_utils import ensure_finite
 from .pauli import pauli_string
 
 try:
@@ -24,8 +25,8 @@ class SharedExactStreamingReservoir:
     """Task-side streaming adapter over pyqres' shared exact dense QRC core.
 
     Readout modes:
-    - ``ancilla_probs``: emit ancilla outcome probabilities after the measurement protocol
-    - ``memory_observables``: emit expectation values of chosen system observables
+    - ancilla_probs: emit ancilla outcome probabilities after the measurement protocol
+    - memory_observables: emit expectation values of chosen system observables
     """
 
     def __init__(
@@ -68,7 +69,7 @@ class SharedExactStreamingReservoir:
         self.rho_joint = np.kron(rho_system, self.core.ancilla_reset_density)
 
     def parse_memory_observable(self, spec: str) -> np.ndarray:
-        """Parse observable specs such as `Z0` or `X0*Z2` on memory qubits."""
+        """Parse observable specs such as Z0 or X0*Z2 on memory qubits."""
 
         cleaned = spec.replace(" ", "")
         if not cleaned:
@@ -185,4 +186,74 @@ class SharedExactStreamingReservoir:
         return x
 
 
-__all__ = ["SharedExactStreamingReservoir", "ExactQRCModel", "ExactQRCModelConfig"]
+class MemoryObservableStreamingReservoir:
+    """Stream task features from any pyqres dimension-analysis reservoir model.
+
+    The adapter applies the model's memory channel at each scalar input and emits
+    expectation values of chosen memory observables. It is useful when a task
+    experiment should use the same reservoir model and observables as the
+    Volterra visibility analysis.
+    """
+
+    def __init__(
+        self,
+        model: object,
+        observables: Sequence[np.ndarray],
+        include_bias: bool = True,
+        init_state: str = "zero",
+    ):
+        self.model = model
+        self.observables = [np.asarray(observable, dtype=complex) for observable in observables]
+        self.include_bias = bool(include_bias)
+        self.init_state = str(init_state)
+        self.reset()
+
+    def _initial_density(self) -> np.ndarray:
+        dim_memory = int(getattr(self.model, "dim_memory"))
+        if self.init_state == "zero":
+            rho = np.zeros((dim_memory, dim_memory), dtype=complex)
+            rho[0, 0] = 1.0
+            return rho
+        if self.init_state == "fixed_point":
+            return np.asarray(self.model.fixed_point(), dtype=complex)
+        if self.init_state == "maximally_mixed":
+            return np.eye(dim_memory, dtype=complex) / float(dim_memory)
+        raise ValueError("init_state must be one of: zero, fixed_point, maximally_mixed")
+
+    def reset(self) -> None:
+        """Reset the memory state before running one input stream."""
+
+        self.rho = ensure_finite("initial memory-observable density", self._initial_density())
+
+    def step(self, u: float) -> np.ndarray:
+        """Advance one scalar input and return one feature row."""
+
+        rho_next = self.model.channel(float(u), self.rho)
+        rho_next = 0.5 * (rho_next + rho_next.conj().T)
+        trace = np.trace(rho_next)
+        if abs(trace) > 1e-15:
+            rho_next = rho_next / trace
+        self.rho = ensure_finite("memory-observable streaming density", rho_next)
+
+        features = np.asarray(
+            [float(np.real_if_close(np.trace(observable @ self.rho))) for observable in self.observables],
+            dtype=float,
+        )
+        if self.include_bias:
+            features = np.concatenate([[1.0], features])
+        return ensure_finite("memory-observable streaming features", features)
+
+    def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
+        """Run a full input stream and stack one feature row per step."""
+
+        self.reset()
+        features = np.vstack([self.step(float(u)) for u in inputs])
+        return ensure_finite("memory-observable streaming feature matrix", features)
+
+
+__all__ = [
+    "ExactQRCModel",
+    "ExactQRCModelConfig",
+    "MemoryObservableStreamingReservoir",
+    "SharedExactStreamingReservoir",
+]

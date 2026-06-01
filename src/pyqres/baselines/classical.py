@@ -47,7 +47,7 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
 
 
 def _lagged_design_matrix(observed: np.ndarray, n_lags: int) -> np.ndarray:
-    """Build `[1, y_t, y_{t-1}, ...]` features for scalar channel observations."""
+    """Build [1, y_t, y_{t-1}, ...] features for scalar channel observations."""
 
     observed = np.asarray(observed, dtype=float).reshape(-1)
     if n_lags < 1:
@@ -176,7 +176,7 @@ def _fit_logistic_regression(X: np.ndarray, y01: np.ndarray, cfg: LogisticEquali
             grad = X.T @ (probs - y01) + reg @ w
         r = probs * (1.0 - probs)
         # Hessian of the negative log-likelihood plus L2 penalty. The intercept
-        # penalty was zeroed in `reg`, so it stays unregularized.
+        # penalty was zeroed in reg, so it stays unregularized.
         with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
             hessian = (X.T * r) @ X + reg
         if not np.isfinite(grad).all() or not np.isfinite(hessian).all():

@@ -87,7 +87,7 @@ class SweepRule:
 class ConfigurableSweep:
     """Concrete sweep family assembled from config data.
 
-    ``base_params`` defines one reference parameter set. ``sweep_rules`` then say
+    base_params defines one reference parameter set. sweep_rules then say
     which fields should vary when the abstract sweep coordinate changes.
     """
 
@@ -150,11 +150,11 @@ def build_sweep(sweep_cfg: Mapping[str, Any]) -> SweepFamilyProtocol:
 
     Expected structure:
 
-    - ``family``: model family name in ``MODEL_REGISTRY``
-    - ``name``: optional human-readable label
-    - ``base_params``: mapping used to instantiate the model parameter dataclass
-    - ``sweep.parameter``: logical name shown in outputs/plots
-    - ``sweep.rules``: list of field updates driven by the sweep value
+    - family: model family name in MODEL_REGISTRY
+    - name: optional human-readable label
+    - base_params: mapping used to instantiate the model parameter dataclass
+    - sweep.parameter: logical name shown in outputs/plots
+    - sweep.rules: list of field updates driven by the sweep value
     """
 
     cfg = _normalize_mapping(sweep_cfg)

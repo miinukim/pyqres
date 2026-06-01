@@ -23,7 +23,7 @@ class ChannelMapReservoir:
     """Exact expectation-value reservoir using the shared dense QRC model.
 
     This class tracks only the reduced system density matrix between steps. The
-    ancilla is freshly reset inside `ExactQRCModel.exact_step_from_system`, which
+    ancilla is freshly reset inside ExactQRCModel.exact_step_from_system, which
     makes the output deterministic unless optional multinomial shot noise is
     requested.
     """
