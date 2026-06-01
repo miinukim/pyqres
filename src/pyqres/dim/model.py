@@ -82,7 +82,7 @@ class ReservoirBase:
         n_memory: int,
         n_readout: int,
         reset_to_zero_state: bool,
-        cache_max_entries: int | None = 64,
+        cache_max_entries: int | None = 1024,
     ) -> None:
         # memory is the subsystem whose effective open dynamics we analyze.
         # readout is reset after each step, which induces the effective memory channel.
@@ -139,16 +139,12 @@ class ReservoirBase:
     def _input_physical_sites(
         self,
         *,
-        input_on_memory: bool,
+        input_on_memory: bool = True,
         input_site: int,
         input_sites: Sequence[int] | None,
     ) -> tuple[int, ...]:
-        """Convert logical input-site indices into joint-system site indices.
-
-        Older configs specify one site through input_site. Newer encoding
-        sweeps can specify input_sites to drive the same scalar input through
-        several qubits at once. The returned indices are physical sites in the
-        joint memory+readout Hilbert space.
+        """
+        Convert logical input-site indices into joint-system site indices.
         """
 
         logical_sites = tuple(int(site) for site in input_sites) if input_sites is not None else (int(input_site),)
@@ -259,14 +255,14 @@ class ReservoirBase:
         observable_memory: np.ndarray,
         u0: float = 0.0,
         fd_step: float = 5e-3,
-        stencil_radius: int | None = None,
+        radius: int | None = None,
     ) -> np.ndarray:
         if order < 0:
             raise ValueError(f"Derivative order must be non-negative, got {order}.")
         if order == 0:
             return self.channel_adjoint(u0, observable_memory)
-        radius = stencil_radius if stencil_radius is not None else max(2, order + 1)
-        points = list(range(-radius, radius + 1))
+        radius_value = radius if radius is not None else max(2, order + 1)
+        points = list(range(-radius_value, radius_value + 1))
         # The implementation is matrix-free with respect to the PTM: it samples
         # the adjoint channel directly on the current observable and then applies
         # a scalar finite-difference stencil entrywise.
@@ -456,7 +452,7 @@ class IsingReservoirParameters:
 
     # Hamiltonian used in the current Ising reservoir model:
     #
-    #     H(u) = H0 + u V
+    #     H(u) = H0 + u H1
     #
     # where the static part H0 is
     #
@@ -470,7 +466,7 @@ class IsingReservoirParameters:
     #
     # and the input-dependent term is
     #
-    #     V = input_strength * Z_{input_site}
+    #     H1 = input_strength * Z_{input_site}
     #
     # by default, or the corresponding normalized sum over input_sites when
     # multi-qubit scalar encoding is requested. The selected sites act either on
@@ -507,7 +503,7 @@ class IsingReservoirParameters:
     #     the effective open dynamics of the memory subsystem.
     #
     # - input_strength:
-    #     Overall scale of the input-driving term V.
+    #     Overall scale of the input Hamiltonian H1.
     #     The scalar input u enters multiplicatively as u * input_strength.
     #
     # - input_on_memory:
@@ -520,7 +516,7 @@ class IsingReservoirParameters:
     #
     # - input_sites:
     #     Optional list/tuple of qubit indices driven by the same scalar input.
-    #     For example, [0, 1, 2] uses V proportional to Z0 + Z1 + Z2.
+    #     For example, [0, 1, 2] uses H1 proportional to Z0 + Z1 + Z2.
     #
     # - input_strength_normalization:
     #     Controls how the per-site input strength is scaled for multi-site
@@ -547,9 +543,9 @@ class IsingReservoirModel(ReservoirBase):
     def __init__(self, params: IsingReservoirParameters):
         self.params = params
         self._initialize_common(params.n_memory, params.n_readout, params.reset_to_zero_state)
-        # Precompute the static Hamiltonian and the operator multiplied by the scalar input u.
+        # Precompute the static Hamiltonian and the H1 operator multiplied by the scalar input u.
         self._h0 = self._build_h0()
-        self._v = self._build_input_generator()
+        self._h1 = self._build_h1()
 
     def _build_h0(self) -> np.ndarray:
         p = self.params
@@ -583,7 +579,7 @@ class IsingReservoirModel(ReservoirBase):
         # H is assembled term-by-term directly in the dense computational basis.
         return H
 
-    def _build_input_generator(self) -> np.ndarray:
+    def _build_h1(self) -> np.ndarray:
         p = self.params
         pauli = p.input_axis.upper()
         if pauli not in {"X", "Y", "Z"}:
@@ -609,13 +605,13 @@ class IsingReservoirModel(ReservoirBase):
         return self._h0
 
     @property
-    def v(self) -> np.ndarray:
-        return self._v
+    def h1(self) -> np.ndarray:
+        return self._h1
 
     def _build_unitary(self, u: float) -> np.ndarray:
-        # Form H(u) = H0 + u V and use a Hermitian eigendecomposition rather than a
+        # Form H(u) = H0 + u H1 and use a Hermitian eigendecomposition rather than a
         # general matrix exponential so numerical errors are easier to diagnose.
-        H = self._h0 + u * self._v
+        H = self._h0 + u * self._h1
         ensure_finite("Hamiltonian", H)
         # Re-Hermitize after summation to suppress small floating-point asymmetries.
         H = 0.5 * (H + H.conj().T)
@@ -639,178 +635,6 @@ class IsingReservoirModel(ReservoirBase):
         phased_evecs = evecs * phases[np.newaxis, :]
         # Reconstruct exp(-i tau H) from the Hermitian eigendecomposition.
         return checked_matmul("unitary eigendecomposition reconstruction", phased_evecs, evecs.conj().T)
-
-
-@dataclass
-class FloquetIsingReservoirParameters:
-    n_memory: int = 3
-    n_readout: int = 1
-    tau_diag: float = 0.2
-    tau_mix: float = 0.2
-    tau_couple: float = 0.2
-    hz_memory: float = 0.8
-    hx_memory: float = 0.8
-    jzz_memory: float = 1.0
-    jxx_memory: float = 0.0
-    jxy_memory: float = 0.0
-    jzz_next_nearest: float = 0.0
-    hz_readout: float = 0.1
-    hx_readout: float = 0.8
-    kz_memory_readout: float = 0.7
-    kx_memory_readout: float = 0.0
-    input_strength: float = 1.0
-    input_axis: str = "Z"
-    input_on_memory: bool = True
-    input_site: int = 0
-    input_sites: tuple[int, ...] | None = None
-    input_strength_normalization: str = "none"
-    input_piece: str = "mix"  # one of {diag, mix, couple}
-    periodic_memory_chain: bool = False
-    reset_to_zero_state: bool = True
-
-
-class FloquetIsingReservoirBase(ReservoirBase):
-    """Base class for piecewise Floquet variants of the Ising reservoir.
-
-    Instead of one Hamiltonian applied for one total time step, the Floquet
-    models split the evolution into several noncommuting pieces. The input drive
-    can be inserted into exactly one of those pieces.
-    """
-
-    def __init__(self, params: FloquetIsingReservoirParameters):
-        self.params = params
-        self._initialize_common(params.n_memory, params.n_readout, params.reset_to_zero_state)
-        # Store the three Floquet pieces separately so the input can be injected into one chosen kick.
-        self._diag_h = self._build_diag_piece()
-        self._mix_h = self._build_mix_piece()
-        self._couple_h = self._build_coupling_piece()
-        self._v = self._build_input_generator()
-
-    def _build_diag_piece(self) -> np.ndarray:
-        # diag collects all Z-type terms that are diagonal in the computational basis.
-        p = self.params
-        H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
-        for i in range(p.n_memory):
-            if abs(p.hz_memory) > 0:
-                H += p.hz_memory * self._single(self._memory_site(i), "Z")
-        for a in range(p.n_readout):
-            if abs(p.hz_readout) > 0:
-                H += p.hz_readout * self._single(self._readout_site(a), "Z")
-        for i, j in self._memory_edges(p.periodic_memory_chain):
-            if abs(p.jzz_memory) > 0:
-                H += p.jzz_memory * self._pair(self._memory_site(i), "Z", self._memory_site(j), "Z")
-        if abs(p.jzz_next_nearest) > 0 and p.n_memory >= 3:
-            for i, j in self._memory_next_nearest_edges(p.periodic_memory_chain):
-                H += p.jzz_next_nearest * self._pair(self._memory_site(i), "Z", self._memory_site(j), "Z")
-        return H
-
-    def _build_mix_piece(self) -> np.ndarray:
-        # mix contains local X fields and intra-memory non-diagonal couplings.
-        p = self.params
-        H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
-        for i in range(p.n_memory):
-            if abs(p.hx_memory) > 0:
-                H += p.hx_memory * self._single(self._memory_site(i), "X")
-        for a in range(p.n_readout):
-            if abs(p.hx_readout) > 0:
-                H += p.hx_readout * self._single(self._readout_site(a), "X")
-        for i, j in self._memory_edges(p.periodic_memory_chain):
-            if abs(p.jxx_memory) > 0:
-                H += p.jxx_memory * self._pair(self._memory_site(i), "X", self._memory_site(j), "X")
-            if abs(p.jxy_memory) > 0:
-                H += p.jxy_memory * self._pair(self._memory_site(i), "X", self._memory_site(j), "Y")
-                H += p.jxy_memory * self._pair(self._memory_site(i), "Y", self._memory_site(j), "X")
-        return H
-
-    def _build_coupling_piece(self) -> np.ndarray:
-        # couple contains the explicit memory-readout interaction terms.
-        p = self.params
-        H = np.zeros((self.dim_total, self.dim_total), dtype=complex)
-        for i in range(p.n_memory):
-            for a in range(p.n_readout):
-                if abs(p.kz_memory_readout) > 0:
-                    H += p.kz_memory_readout * self._pair(self._memory_site(i), "Z", self._readout_site(a), "Z")
-                if abs(p.kx_memory_readout) > 0:
-                    H += p.kx_memory_readout * self._pair(self._memory_site(i), "X", self._readout_site(a), "X")
-        return H
-
-    def _build_input_generator(self) -> np.ndarray:
-        p = self.params
-        pauli = p.input_axis.upper()
-        if pauli not in {"X", "Y", "Z"}:
-            raise ValueError(f"Unsupported input_axis '{p.input_axis}'")
-        sites = self._input_physical_sites(
-            input_on_memory=p.input_on_memory,
-            input_site=p.input_site,
-            input_sites=p.input_sites,
-        )
-        scale = self._input_strength_prefactor(
-            p.input_strength,
-            len(sites),
-            p.input_strength_normalization,
-        )
-        # Floquet models use the same scalar multi-site input convention as the
-        # single-step model, injected into the selected Floquet piece.
-        out = np.zeros((self.dim_total, self.dim_total), dtype=complex)
-        for site in sites:
-            out += scale * self._single(site, pauli)
-        return out
-
-    @property
-    def diag_h(self) -> np.ndarray:
-        return self._diag_h
-
-    @property
-    def mix_h(self) -> np.ndarray:
-        return self._mix_h
-
-    @property
-    def couple_h(self) -> np.ndarray:
-        return self._couple_h
-
-    @property
-    def v(self) -> np.ndarray:
-        return self._v
-
-    def _piece_with_input(self, base: np.ndarray, piece_name: str, u: float) -> np.ndarray:
-        # Only one segment of the Floquet cycle receives the scalar input drive.
-        if self.params.input_piece == piece_name:
-            return base + u * self._v
-        return base
-
-
-class TwoStepFloquetIsingReservoirModel(FloquetIsingReservoirBase):
-    """
-    Two-step Floquet cycle with a diagonal Ising kick followed by a combined
-    mixing/coupling kick. This is the simplest alternating-noncommuting reservoir.
-    """
-
-    def _build_unitary(self, u: float) -> np.ndarray:
-        H_diag = self._piece_with_input(self._diag_h, "diag", u)
-        H_mix_total = self._mix_h + self._couple_h
-        if self.params.input_piece in {"mix", "couple"}:
-            H_mix_total = H_mix_total + u * self._v
-        # The two-step model alternates a diagonal kick with one combined noncommuting kick.
-        U_diag = la.expm(-1j * self.params.tau_diag * H_diag)
-        U_mix = la.expm(-1j * self.params.tau_mix * H_mix_total)
-        return U_mix @ U_diag
-
-
-class ThreeStepFloquetIsingReservoirModel(FloquetIsingReservoirBase):
-    """
-    Three-step Floquet cycle with separate diagonal, mixing, and memory-readout
-    coupling kicks. The ordering is U = U_couple U_mix U_diag.
-    """
-
-    def _build_unitary(self, u: float) -> np.ndarray:
-        H_diag = self._piece_with_input(self._diag_h, "diag", u)
-        H_mix = self._piece_with_input(self._mix_h, "mix", u)
-        H_couple = self._piece_with_input(self._couple_h, "couple", u)
-        # Keep the three kicks separate so their ordering remains explicit in the code and the model.
-        U_diag = la.expm(-1j * self.params.tau_diag * H_diag)
-        U_mix = la.expm(-1j * self.params.tau_mix * H_mix)
-        U_couple = la.expm(-1j * self.params.tau_couple * H_couple)
-        return U_couple @ U_mix @ U_diag
 
 
 @dataclass

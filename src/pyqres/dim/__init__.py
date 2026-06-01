@@ -13,8 +13,6 @@ from .isotropy import (
     compressed_visibility_metrics,
 )
 from .model import (
-    FloquetIsingReservoirBase,
-    FloquetIsingReservoirParameters,
     HaarRandomReservoirModel,
     HaarRandomReservoirParameters,
     IsingReservoirModel,
@@ -22,8 +20,6 @@ from .model import (
     ReservoirBase,
     SYKReservoirModel,
     SYKReservoirParameters,
-    ThreeStepFloquetIsingReservoirModel,
-    TwoStepFloquetIsingReservoirModel,
 )
 try:  # pragma: no cover
     from .qrclib_model import ExactQRCModel, ExactQRCModelConfig, QRCLibExactReservoirModel
@@ -76,10 +72,6 @@ __all__ = [
     "IsingReservoirParameters",
     "HaarRandomReservoirModel",
     "HaarRandomReservoirParameters",
-    "FloquetIsingReservoirBase",
-    "FloquetIsingReservoirParameters",
-    "TwoStepFloquetIsingReservoirModel",
-    "ThreeStepFloquetIsingReservoirModel",
     "SYKReservoirModel",
     "SYKReservoirParameters",
     "QRCLibExactReservoirModel",

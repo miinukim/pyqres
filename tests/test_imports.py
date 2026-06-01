@@ -9,13 +9,16 @@ def test_core_imports():
 def test_compatibility_imports():
     from pyqres.simulation import ExactQRCModelConfig
     from pyqres.qiskit import QRCReservoir
-    from pyqres.dim import IsingReservoirModel, QRCLibExactReservoirModel
+    from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, QRCLibExactReservoirModel
     from pyqres.tasks import STMConfig
     from pyqres.baselines import ESNConfig
 
     assert ExactQRCModelConfig is not None
     assert QRCReservoir is not None
     assert IsingReservoirModel is not None
+    ising_model = IsingReservoirModel(IsingReservoirParameters(n_memory=1, n_readout=1))
+    assert ising_model.h0.shape == ising_model.h1.shape
+    assert not hasattr(ising_model, "v")
     assert QRCLibExactReservoirModel is not None
     assert STMConfig is not None
     assert ESNConfig is not None

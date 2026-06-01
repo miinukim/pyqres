@@ -54,7 +54,7 @@ class ReservoirModelProtocol(Protocol):
         observable_memory: np.ndarray,
         u0: float = 0.0,
         fd_step: float = 5e-3,
-        stencil_radius: int | None = None,
+        radius: int | None = None,
     ) -> np.ndarray: ...
 
     def fixed_point(self, tol: float = 1e-12, max_iter: int = 10000) -> np.ndarray: ...
@@ -107,15 +107,15 @@ class PTMAffineExpansion:
         model: ReservoirModelProtocol,
         max_order: int,
         fd_step: float = 5e-3,
-        stencil_radius: int | None = None,
+        radius: int | None = None,
         expansion_point: float = 0.0,
     ):
         self.model = model
         self.max_order = max_order
         self.fd_step = fd_step
-        self.stencil_radius = stencil_radius if stencil_radius is not None else max(2, max_order + 1)
+        self.radius = radius if radius is not None else max(2, max_order + 1)
         self.expansion_point = float(expansion_point)
-        self.points = list(range(-self.stencil_radius, self.stencil_radius + 1))
+        self.points = list(range(-self.radius, self.radius + 1))
         self.T_samples: Dict[int, np.ndarray] = {}
         self.A_derivs: Dict[int, np.ndarray] = {}
         self.b_derivs: Dict[int, np.ndarray] = {}
@@ -473,7 +473,7 @@ class ObservableVolterraBasisBuilder:
         lag_horizon: int,
         fd_step: float = 5e-3,
         algebraic_tol: float = 1e-9,
-        stencil_radius: int | None = None,
+        radius: int | None = None,
         max_basis_size: int | None = None,
         expansion_point: float = 0.0,
     ):
@@ -483,7 +483,7 @@ class ObservableVolterraBasisBuilder:
         self.lag_horizon = lag_horizon
         self.fd_step = fd_step
         self.algebraic_tol = algebraic_tol
-        self.stencil_radius = stencil_radius if stencil_radius is not None else max(2, max_order + 1)
+        self.radius = radius if radius is not None else max(2, max_order + 1)
         self.max_basis_size = max_basis_size
         self.expansion_point = float(expansion_point)
 
@@ -549,7 +549,7 @@ class ObservableVolterraBasisBuilder:
                             state.operator,
                             u0=self.expansion_point,
                             fd_step=self.fd_step,
-                            stencil_radius=self.stencil_radius,
+                            radius=self.radius,
                         ),
                         total_order=state.total_order + q,
                         total_drift=state.total_drift,

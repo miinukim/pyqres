@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import scipy.linalg as la
 
-from .linalg_utils import null_space, orthonormal_basis_from_columns
+from .linalg_utils import null_space, orthonormal_basis_from_columns, ensure_hermiticity
 
 
 def _encode_complex_matrix(matrix: np.ndarray) -> str:
@@ -203,7 +203,7 @@ def compressed_visibility_diagnostics(
     # Visible directions are the orthogonal complement of the readout nullspace.
     p_null = _orth_projector(readout_nullspace, ambient_dim)
     p_vis = np.eye(ambient_dim, dtype=complex) - p_null
-    p_vis = 0.5 * (p_vis + p_vis.conj().T)
+    p_vis = ensure_hermiticity(p_vis)
     r_visible = int(ambient_dim - readout_nullspace.shape[1])
     alpha_ambient = float(r_visible / ambient_dim) if ambient_dim > 0 else float("nan")
 
@@ -237,7 +237,7 @@ def compressed_visibility_diagnostics(
         )
 
     b_gamma = q_gamma.conj().T @ p_vis @ q_gamma
-    b_gamma = 0.5 * (b_gamma + b_gamma.conj().T)
+    b_gamma = ensure_hermiticity(b_gamma)
     # Eigenvalues of B_gamma are sin^2(theta_j), including exact-null directions.
     evals, evecs = la.eigh(b_gamma, check_finite=True)
     evals = np.clip(np.real_if_close(evals), 0.0, 1.0)
@@ -316,7 +316,7 @@ def compressed_visibility_diagnostics(
         )
 
     b_plus = q_plus.conj().T @ p_vis @ q_plus
-    b_plus = 0.5 * (b_plus + b_plus.conj().T)
+    b_plus = ensure_hermiticity(b_plus)
     plus_evals = np.clip(np.real_if_close(la.eigvalsh(b_plus, check_finite=True)), 0.0, 1.0)
     plus_angles = _visibility_angles_deg(plus_evals)
     alpha_plus = float(np.real_if_close(np.trace(b_plus)) / supported_dim)

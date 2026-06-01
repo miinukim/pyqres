@@ -24,13 +24,10 @@ import pandas as pd
 from .analysis import VolterraAnalyzer
 from .linalg_utils import NumericalStabilityError
 from .model import (
-    FloquetIsingReservoirParameters,
     HaarRandomReservoirModel,
     HaarRandomReservoirParameters,
     IsingReservoirModel,
     IsingReservoirParameters,
-    ThreeStepFloquetIsingReservoirModel,
-    TwoStepFloquetIsingReservoirModel,
 )
 
 
@@ -50,8 +47,6 @@ class SweepFamilyProtocol(Protocol):
 MODEL_REGISTRY = {
     "ising": (IsingReservoirParameters, IsingReservoirModel),
     "haar_random": (HaarRandomReservoirParameters, HaarRandomReservoirModel),
-    "two_step_floquet": (FloquetIsingReservoirParameters, TwoStepFloquetIsingReservoirModel),
-    "three_step_floquet": (FloquetIsingReservoirParameters, ThreeStepFloquetIsingReservoirModel),
 }
 
 DEFAULT_SWEEP_LABELS = {

@@ -73,6 +73,11 @@ def checked_matmul(name: str, left: np.ndarray, right: np.ndarray) -> np.ndarray
     return ensure_finite(name, out)
 
 
+def ensure_hermiticity(arr: np.ndarray):
+    # Ensure Hermiticity a given matrix
+    return 0.5 * (arr + arr.conj().T)
+
+
 def partial_trace_last_subsystem(op: np.ndarray, dim_memory: int, dim_readout: int) -> np.ndarray:
     # Interpret the operator as memory x readout x memory x readout and trace out readout.
     reshaped = op.reshape(dim_memory, dim_readout, dim_memory, dim_readout)

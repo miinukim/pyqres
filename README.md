@@ -234,7 +234,7 @@ Files:
 
 - dim/pauli.py - Pauli basis and Pauli-string utilities
 - dim/linalg_utils.py - PTM coordinates, ranks, null spaces, derivatives
-- dim/model.py - Ising, Floquet Ising, Haar-random, and SYK reservoir models
+- dim/model.py - Ising, Haar-random, and SYK reservoir models
 - dim/analysis.py - affine PTM expansions and Volterra analyzers
 - dim/isotropy.py - compressed visibility projector diagnostics
 - dim/qrclib_model.py - wrapper from the simulation core into dim analysis
