@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
-from pyqres.core import HamiltonianSpec, dense_hamiltonian_matrix
+from pyqres.core import HamiltonianSpec, ReservoirParams, dense_hamiltonian_matrix
 
 from .config import QRCConfig
 
@@ -42,22 +42,27 @@ class QRCReservoir:
             raise ImportError("qiskit is required (pip install qiskit qiskit-aer).")
         self.cfg = cfg
         self.rng = np.random.default_rng(cfg.seed)
-        self._init_disorder()
+        self._init_backend_parameters()
 
-    def _init_disorder(self) -> None:
-        """Initialize reproducible random fields, couplings, and input signs."""
+    def _init_backend_parameters(self) -> None:
+        """Initialize reusable Hamiltonian specs and random input signs."""
 
         cfg = self.cfg
         n = cfg.total_qubits()
         rs = np.random.RandomState(cfg.seed)
-        self.hx0 = 1.0 + 0.3 * rs.randn(n)
-        self.hz1 = 1.0 + 0.3 * rs.randn(n)
-        # Match ReservoirParams.ising_type: an open-boundary nearest-neighbor
-        # Ising chain with no configurable graph topology.
-        self.J = np.zeros((n, n), dtype=float)
-        for i in range(n - 1):
-            self.J[i, i + 1] = float(rs.rand())
         self.input_sign = rs.choice([-1.0, 1.0], size=n)
+        if cfg.H0_hamiltonian is None and cfg.H1_hamiltonian is None:
+            generated = ReservoirParams.ising_type(
+                n_system=cfg.n_system,
+                n_ancilla=cfg.n_ancilla,
+                tau=cfg.tau,
+                seed=cfg.seed,
+            ).generate()
+            self.H0_hamiltonian = generated["H0_hamiltonian"]
+            self.H1_hamiltonian = generated["H1_hamiltonian"]
+        else:
+            self.H0_hamiltonian = cfg.H0_hamiltonian
+            self.H1_hamiltonian = cfg.H1_hamiltonian
 
     def _to_sparse_pauli_op(self, hamiltonian_like: object | None) -> "SparsePauliOp":
         """Convert backend-neutral Hamiltonian input to Qiskit's sparse Pauli form."""
@@ -101,8 +106,8 @@ class QRCReservoir:
 
         if PauliEvolutionGate is None:
             raise ImportError("qiskit is required for pauli_evolution reservoirs.")
-        h0 = self._to_sparse_pauli_op(self.cfg.H0_hamiltonian)
-        h1 = self._to_sparse_pauli_op(self.cfg.H1_hamiltonian)
+        h0 = self._to_sparse_pauli_op(self.H0_hamiltonian)
+        h1 = self._to_sparse_pauli_op(self.H1_hamiltonian)
         hamiltonian = h0 + float(self.cfg.input_scale * uval) * h1
         qc.append(
             PauliEvolutionGate(hamiltonian, time=float(self.cfg.tau), synthesis=self._evolution_synthesis()),
@@ -122,11 +127,6 @@ class QRCReservoir:
             for q in range(n):
                 sgn = 1.0 if cfg.input_map == "global" else float(self.input_sign[q])
                 qc.rz(sgn * s * uval, q)
-        elif cfg.encoding == "hamiltonian_trotter":
-            for q in range(n):
-                sgn = 1.0 if cfg.input_map == "global" else float(self.input_sign[q])
-                a = cfg.tau * (s * uval) * (self.hz1[q] * sgn)
-                qc.rz(2.0 * a, q)
         else:
             raise ValueError(f"Unknown encoding: {cfg.encoding}")
 
@@ -135,18 +135,7 @@ class QRCReservoir:
 
         cfg = self.cfg
         n = cfg.total_qubits()
-        if cfg.reservoir_type == "ising_like":
-            for _ in range(cfg.depth_per_step):
-                for q in range(n):
-                    a = cfg.tau * self.hx0[q] / cfg.depth_per_step
-                    qc.rx(2.0 * a, q)
-                for i in range(n):
-                    for j in range(i + 1, n):
-                        Jij = self.J[i, j]
-                        if Jij != 0.0:
-                            a = cfg.tau * Jij / cfg.depth_per_step
-                            qc.rzz(2.0 * a, i, j)
-        elif cfg.reservoir_type == "random_cx_rz":
+        if cfg.reservoir_type == "random_cx_rz":
             for _ in range(cfg.depth_per_step):
                 # Shuffle pairings at each layer so the random-CX reservoir does
                 # not repeatedly couple the same neighboring indices.
@@ -297,7 +286,3 @@ class QRCReservoir:
         job = backend.run(qc, shots=cfg.shots)
         counts = job.result().get_counts(0)
         return self.features_from_counts(counts, sys_bits, anc_bits)
-
-
-# Backward-compatible alias retained inside the forked codebase.
-NISQReservoir = QRCReservoir

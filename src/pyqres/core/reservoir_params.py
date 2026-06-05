@@ -9,8 +9,6 @@ ReservoirParams supports three levels of Hamiltonian specification:
    concrete representation
 
 The simulation core evolves Hamiltonian inputs as H(u) = H0 + input_scale*u*H1.
-For historical configs, the Ising preset still also returns hx0_vec,
-hz1_vec, and J_mat.
 """
 
 from __future__ import annotations
@@ -246,10 +244,11 @@ class HamiltonianSpec:
 class ReservoirParams:
     """Hamiltonian parameter generation for simulation reservoirs.
 
-    The Ising-type preset produces explicit vectors/matrices:
-    transverse fields hx0_vec, input-modulated longitudinal fields hz1_vec,
-    and nearest-neighbor open-boundary ZZ couplings J_mat. This dataclass
-    provides reproducible defaults so experiments can be described compactly.
+    The public output is always a backend-neutral pair H0_hamiltonian and
+    H1_hamiltonian. The built-in Ising-type preset is just a compact generator
+    for one such pair: H0 contains fixed transverse X fields and open-boundary
+    nearest-neighbor ZZ couplings, while H1 contains the input-modulated Z
+    fields.
 
     For broader Hamiltonians, set hamiltonian_kind="matrix" and provide
     h0_matrix/h1_matrix, or set hamiltonian_kind="pauli_terms" and provide
@@ -261,13 +260,13 @@ class ReservoirParams:
     tau: float = 1.0
     seed: int = 17462
     hamiltonian_kind: str = "ising"
-    hx0_base: float = 1.0
-    hz1_base: float = 1.0
-    hx0_std: float = 0.3
-    hz1_std: float = 0.3
-    hx0_scale: float = 1.0
-    hz1_scale: float = 1.0
-    J_scale: float = 1.0
+    fixed_x_field_base: float = 1.0
+    input_z_field_base: float = 1.0
+    fixed_x_field_std: float = 0.3
+    input_z_field_std: float = 0.3
+    fixed_x_field_scale: float = 1.0
+    input_z_field_scale: float = 1.0
+    zz_coupling_scale: float = 1.0
     h0_matrix: Any | None = None
     h1_matrix: Any | None = None
     h0_hamiltonian: HamiltonianSpec | None = None
@@ -379,18 +378,23 @@ class ReservoirParams:
             "hamiltonian_kind": "pauli_terms",
         }
 
-    def _ising_hamiltonian_specs(self, hx0: np.ndarray, hz1: np.ndarray, J: np.ndarray) -> tuple[HamiltonianSpec, HamiltonianSpec]:
+    def _ising_hamiltonian_specs(
+        self,
+        fixed_x_field: np.ndarray,
+        input_z_field: np.ndarray,
+        zz_coupling: np.ndarray,
+    ) -> tuple[HamiltonianSpec, HamiltonianSpec]:
         """Represent the generated Ising preset as symbolic Pauli terms."""
 
         h0_terms: list[PauliTerm] = []
         h1_terms: list[PauliTerm] = []
         n = self.n_qubits()
         for idx in range(n):
-            h0_terms.append(PauliTerm(complex(hx0[idx]), ((idx, "X"),)))
-            h1_terms.append(PauliTerm(complex(hz1[idx]), ((idx, "Z"),)))
+            h0_terms.append(PauliTerm(complex(fixed_x_field[idx]), ((idx, "X"),)))
+            h1_terms.append(PauliTerm(complex(input_z_field[idx]), ((idx, "Z"),)))
         for i in range(n):
             for j in range(i + 1, n):
-                jij = float(J[i, j])
+                jij = float(zz_coupling[i, j])
                 if jij != 0.0:
                     h0_terms.append(PauliTerm(complex(jij), ((i, "Z"), (j, "Z"))))
         return (
@@ -399,39 +403,31 @@ class ReservoirParams:
         )
 
     def generate(self) -> dict:
-        """Generate Hamiltonian parameters and backend-neutral Hamiltonian specs.
-
-        J_mat stores only the upper-triangular couplings because downstream
-        Hamiltonian construction iterates over i < j. Keeping the lower
-        triangle zero also makes serialized configs easier to inspect.
-        """
+        """Generate backend-neutral Hamiltonian specs for the requested kind."""
 
         kind = self.hamiltonian_kind.lower()
         if kind in {"matrix", "dense", "custom_matrix"}:
             return self._generate_matrix_hamiltonian()
         if kind in {"pauli", "pauli_terms", "terms"}:
             return self._generate_pauli_terms_hamiltonian()
-        if kind not in {"ising", "ising_type", "ising-like", "ising_like"}:
+        if kind not in {"ising", "ising_type"}:
             raise ValueError(f"Unsupported hamiltonian_kind '{self.hamiltonian_kind}'.")
 
         n = self.n_qubits()
         rs = np.random.RandomState(seed=self.seed)
 
-        hx0 = (self.hx0_base + self.hx0_std * rs.randn(n)) * self.hx0_scale
-        hz1 = (self.hz1_base + self.hz1_std * rs.randn(n)) * self.hz1_scale
+        fixed_x_field = (self.fixed_x_field_base + self.fixed_x_field_std * rs.randn(n)) * self.fixed_x_field_scale
+        input_z_field = (self.input_z_field_base + self.input_z_field_std * rs.randn(n)) * self.input_z_field_scale
 
         # Standard open-boundary Ising chain: only nearest-neighbor ZZ couplings
         # are active, with no wrap-around edge between the last and first qubit.
-        J_graph = np.zeros((n, n), dtype=float)
+        coupling_graph = np.zeros((n, n), dtype=float)
         for i in range(n - 1):
-            J_graph[i, i + 1] = 1.0
+            coupling_graph[i, i + 1] = 1.0
 
-        J = self.J_scale * (rs.rand(n, n) * J_graph)
-        h0, h1 = self._ising_hamiltonian_specs(hx0, hz1, J)
+        zz_coupling = self.zz_coupling_scale * (rs.rand(n, n) * coupling_graph)
+        h0, h1 = self._ising_hamiltonian_specs(fixed_x_field, input_z_field, zz_coupling)
         return {
-            "hx0_vec": hx0,
-            "hz1_vec": hz1,
-            "J_mat": J,
             "H0_hamiltonian": h0,
             "H1_hamiltonian": h1,
             "H0_matrix": None,

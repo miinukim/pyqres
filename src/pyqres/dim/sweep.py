@@ -24,10 +24,10 @@ import pandas as pd
 from .analysis import VolterraAnalyzer
 from .linalg_utils import NumericalStabilityError
 from .model import (
-    HaarRandomReservoirModel,
-    HaarRandomReservoirParameters,
     IsingReservoirModel,
     IsingReservoirParameters,
+    RandomPauliReservoirModel,
+    RandomPauliReservoirParameters,
 )
 
 
@@ -46,7 +46,7 @@ class SweepFamilyProtocol(Protocol):
 
 MODEL_REGISTRY = {
     "ising": (IsingReservoirParameters, IsingReservoirModel),
-    "haar_random": (HaarRandomReservoirParameters, HaarRandomReservoirModel),
+    "random_pauli": (RandomPauliReservoirParameters, RandomPauliReservoirModel),
 }
 
 DEFAULT_SWEEP_LABELS = {

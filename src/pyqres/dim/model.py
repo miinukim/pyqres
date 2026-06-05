@@ -638,7 +638,7 @@ class IsingReservoirModel(ReservoirBase):
 
 
 @dataclass
-class HaarRandomReservoirParameters:
+class RandomPauliReservoirParameters:
     n_memory: int = 5
     n_readout: int = 1
     depth: int = 3
@@ -650,12 +650,13 @@ class HaarRandomReservoirParameters:
     input_scale: float = 0.5
 
 
-class HaarRandomReservoirModel(ReservoirBase):
-    """Random-circuit reservoir with GHZ-like input encoding.
+class RandomPauliReservoirModel(ReservoirBase):
+    """Finite-depth random Pauli-basis circuit reservoir with GHZ-like input encoding.
 
     The circuit is fixed once at initialization. Each layer applies independent
-    single-qubit Haar-random SU(2) rotations followed by a brickwork pattern of
-    nearest-neighbor CNOT gates across the full memory+readout register.
+    random single-qubit SU(2) rotations, expanded in the Pauli basis, followed
+    by a brickwork pattern of nearest-neighbor CNOT gates across the full
+    memory+readout register.
 
     The scalar input u is not injected through the Hamiltonian. Instead, it
     is first mapped to a valid qubit-population parameter
@@ -675,9 +676,9 @@ class HaarRandomReservoirModel(ReservoirBase):
     u = 0.
     """
 
-    def __init__(self, params: HaarRandomReservoirParameters):
+    def __init__(self, params: RandomPauliReservoirParameters):
         if params.n_readout < 1:
-            raise ValueError("HaarRandomReservoirModel requires n_readout >= 1")
+            raise ValueError("RandomPauliReservoirModel requires n_readout >= 1")
         if not (0 <= params.input_qubit < params.n_readout):
             raise ValueError(
                 f"input_qubit={params.input_qubit} must lie in [0, {params.n_readout - 1}]"
@@ -720,12 +721,11 @@ class HaarRandomReservoirModel(ReservoirBase):
             dtype=complex,
         )
 
-    def _haar_random_single_qubit(self, rng: np.random.Generator) -> np.ndarray:
-        # Euler-angle construction for a Haar-random SU(2) gate.
+    def _random_su2_single_qubit(self, rng: np.random.Generator) -> np.ndarray:
+        # Euler-angle construction for one random SU(2) gate.
         alpha = 2.0 * np.pi * rng.random()
         gamma = 2.0 * np.pi * rng.random()
-        z = rng.random()
-        beta = 2.0 * np.arccos(np.sqrt(z))
+        beta = 2.0 * np.arccos(np.sqrt(rng.random()))
         return self._rotation_z(alpha) @ self._rotation_y(beta) @ self._rotation_z(gamma)
 
     def _single_site_unitary(self, site: int, gate: np.ndarray) -> np.ndarray:
@@ -756,7 +756,7 @@ class HaarRandomReservoirModel(ReservoirBase):
 
         for layer in range(self.params.depth):
             for site in range(self.n_total):
-                gate = self._haar_random_single_qubit(rng)
+                gate = self._random_su2_single_qubit(rng)
                 U = self._single_site_unitary(site, gate) @ U
 
             start = layer % 2
@@ -766,7 +766,7 @@ class HaarRandomReservoirModel(ReservoirBase):
                 target = control + 1
                 U = self._cnot_gate(control, target) @ U
 
-        return ensure_finite("haar-random circuit unitary", U)
+        return ensure_finite("random Pauli circuit unitary", U)
 
     def _build_unitary(self, u: float) -> np.ndarray:
         # The circuit itself is fixed; only the injected readout state depends on u.
@@ -824,7 +824,7 @@ class HaarRandomReservoirModel(ReservoirBase):
         for weight, psi in zip(evals[active], evecs[:, active].T, strict=False):
             contracted = np.einsum("arbi,i->arb", U4, psi, optimize=True)
             blocks.append(np.sqrt(weight) * np.transpose(contracted, (1, 0, 2)))
-        kraus = ensure_finite(f"haar_kraus_operators(u={u})", np.concatenate(blocks, axis=0))
+        kraus = ensure_finite(f"random_pauli_kraus_operators(u={u})", np.concatenate(blocks, axis=0))
         self._cache_set(self._kraus_cache, u, kraus)
         return kraus
 

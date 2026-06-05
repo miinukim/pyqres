@@ -25,36 +25,6 @@ from pyqres.core.control import (
 from pyqres.core.reservoir_params import ReservoirParams, dense_hamiltonian_matrix
 
 
-PAULI_1Q = {
-    "I": np.array([[1, 0], [0, 1]], dtype=complex),
-    "X": np.array([[0, 1], [1, 0]], dtype=complex),
-    "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
-    "Z": np.array([[1, 0], [0, -1]], dtype=complex),
-}
-
-
-def _kron_all(ops: Sequence[np.ndarray]) -> np.ndarray:
-    """Kronecker product of a sequence of local operators."""
-
-    out = np.array([[1.0 + 0.0j]])
-    for op in ops:
-        out = np.kron(out, op)
-    return out
-
-
-def _single_pauli_dense(n_qubits: int, target: int, pauli: str) -> np.ndarray:
-    ops = [PAULI_1Q["I"]] * n_qubits
-    ops[target] = PAULI_1Q[pauli]
-    return _kron_all(ops)
-
-
-def _two_pauli_dense(n_qubits: int, q1: int, p1: str, q2: int, p2: str) -> np.ndarray:
-    ops = [PAULI_1Q["I"]] * n_qubits
-    ops[q1] = PAULI_1Q[p1]
-    ops[q2] = PAULI_1Q[p2]
-    return _kron_all(ops)
-
-
 def partial_trace_ancilla(op: np.ndarray, dim_system: int, dim_ancilla: int) -> np.ndarray:
     """Trace out the last subsystem, interpreted here as the ancilla register."""
 
@@ -79,12 +49,8 @@ def _int_to_bits(value: int, n_qubits: int) -> list[int]:
 
 
 def _embed_local_unitary(n_qubits: int, targets: Sequence[int], local_unitary: np.ndarray) -> np.ndarray:
-    """Embed a k-qubit unitary acting on arbitrary target indices.
-
-    The routine is intentionally explicit rather than clever: it loops through
-    computational-basis columns, substitutes the target bits, and writes the
-    corresponding amplitudes. This keeps target-index semantics auditable for
-    small dense systems.
+    """
+    Embed a k-qubit unitary acting on arbitrary target indices.
     """
 
     targets = tuple(int(t) for t in targets)
@@ -182,8 +148,8 @@ class ExactQRCModelConfig:
     frontends and analysis wrappers.
     """
 
-    n_system: int = 4
-    n_ancilla: int = 2
+    n_system: int
+    n_ancilla: int
     tau: float = 1.0
     hamiltonian_kind: str = "ising"
     input_encoding: Literal["hamiltonian", "amplitude", "unitary"] = "hamiltonian"
@@ -200,9 +166,6 @@ class ExactQRCModelConfig:
     H1_hamiltonian: Optional[Any] = None
     H0_matrix: Optional[Any] = None
     H1_matrix: Optional[Any] = None
-    hx0_vec: Optional[np.ndarray] = None
-    hz1_vec: Optional[np.ndarray] = None
-    J_mat: Optional[np.ndarray] = None
     seed: int = 17462
     control: MeasurementControlConfig = field(default_factory=MeasurementControlConfig)
 
@@ -232,44 +195,10 @@ class ExactQRCModel:
         self.dim_ancilla = 2**self.nA
         self.dim_total = 2**self.n
         self.control = cfg.control.validated(self.nS, self.nA)
-
-        if (
-            cfg.H0_hamiltonian is not None
-            or cfg.H1_hamiltonian is not None
-            or cfg.H0_matrix is not None
-            or cfg.H1_matrix is not None
-        ):
-            # Generic Hamiltonian mode: callers provide matrix-like Hamiltonians,
-            # usually from ReservoirParams.from_matrices/from_pauli_terms.
-            self.hx0 = None
-            self.hz1 = None
-            self.J = None
-            self.tau = float(cfg.tau)
-            h0_like = cfg.H0_hamiltonian if cfg.H0_hamiltonian is not None else cfg.H0_matrix
-            h1_like = cfg.H1_hamiltonian if cfg.H1_hamiltonian is not None else cfg.H1_matrix
-            self.H0 = self._validate_hamiltonian_matrix("H0_hamiltonian", h0_like)
-            self.H1 = self._validate_hamiltonian_matrix("H1_hamiltonian", h1_like)
-        elif cfg.hx0_vec is None or cfg.hz1_vec is None or cfg.J_mat is None:
-            # If explicit Hamiltonian parameters are absent, derive a
-            # reproducible random reservoir from the compact ReservoirParams
-            # generator. Explicit arrays always take precedence.
-            generated = ReservoirParams(
-                n_system=self.nS,
-                n_ancilla=self.nA,
-                tau=cfg.tau,
-                seed=cfg.seed,
-            ).generate()
-            self.hx0 = np.asarray(generated["hx0_vec"], dtype=float)
-            self.hz1 = np.asarray(generated["hz1_vec"], dtype=float)
-            self.J = np.asarray(generated["J_mat"], dtype=float)
-            self.tau = float(generated["tau"])
-            self.H0, self.H1 = self._build_h0_h1()
-        else:
-            self.hx0 = np.asarray(cfg.hx0_vec, dtype=float)
-            self.hz1 = np.asarray(cfg.hz1_vec, dtype=float)
-            self.J = np.asarray(cfg.J_mat, dtype=float)
-            self.tau = float(cfg.tau)
-            self.H0, self.H1 = self._build_h0_h1()
+        self.tau = float(cfg.tau)
+        h0_like, h1_like = self._resolve_hamiltonians(cfg)
+        self.H0 = self._validate_hamiltonian_matrix("H0_hamiltonian", h0_like)
+        self.H1 = self._validate_hamiltonian_matrix("H1_hamiltonian", h1_like)
 
         self.ancilla_reset_density = computational_zero_density(self.nA)
         self._unitary_cache: OrderedDict[float, np.ndarray] = OrderedDict()
@@ -296,6 +225,29 @@ class ExactQRCModel:
             while len(self._unitary_cache) > max_entries:
                 self._unitary_cache.popitem(last=False)
 
+    def _resolve_hamiltonians(self, cfg: ExactQRCModelConfig) -> tuple[Any | None, Any | None]:
+        """Return the fixed and input-modulated Hamiltonian components.
+
+        Explicit H0/H1 inputs are the public construction path. If they are not
+        provided, the configured ReservoirParams preset is used to generate a
+        backend-neutral pair; the simulator still consumes only H0 and H1.
+        """
+
+        h0_like = cfg.H0_hamiltonian if cfg.H0_hamiltonian is not None else cfg.H0_matrix
+        h1_like = cfg.H1_hamiltonian if cfg.H1_hamiltonian is not None else cfg.H1_matrix
+        if h0_like is not None or h1_like is not None:
+            return h0_like, h1_like
+
+        generated = ReservoirParams(
+            n_system=self.nS,
+            n_ancilla=self.nA,
+            tau=cfg.tau,
+            seed=cfg.seed,
+            hamiltonian_kind=cfg.hamiltonian_kind,
+        ).generate()
+        self.tau = float(generated["tau"])
+        return generated["H0_hamiltonian"], generated["H1_hamiltonian"]
+
     def _validate_hamiltonian_matrix(self, name: str, matrix: Any | None) -> np.ndarray:
         """Validate a user-supplied dense Hamiltonian component."""
 
@@ -308,26 +260,6 @@ class ExactQRCModel:
         if not np.allclose(out, out.conj().T, atol=1e-10):
             raise ValueError(f"{name} must be Hermitian.")
         return 0.5 * (out + out.conj().T)
-
-    def _build_h0_h1(self) -> tuple[np.ndarray, np.ndarray]:
-        """Build fixed and input-modulated Hamiltonian components.
-
-        H0 contains transverse fields plus ZZ couplings. H1 contains the
-        longitudinal Z field that is scaled by the scalar input under
-        Hamiltonian encoding.
-        """
-
-        h0 = np.zeros((self.dim_total, self.dim_total), dtype=complex)
-        h1 = np.zeros_like(h0)
-        for idx in range(self.n):
-            h0 += float(self.hx0[idx]) * _single_pauli_dense(self.n, idx, "X")
-            h1 += float(self.hz1[idx]) * _single_pauli_dense(self.n, idx, "Z")
-        for i in range(self.n):
-            for j in range(i + 1, self.n):
-                jij = float(self.J[i, j])
-                if jij != 0.0:
-                    h0 += jij * _two_pauli_dense(self.n, i, "Z", j, "Z")
-        return h0, h1
 
     def _build_measurement_kraus(self) -> list[np.ndarray]:
         """Create ancilla-only Kraus operators from the configured measurement."""

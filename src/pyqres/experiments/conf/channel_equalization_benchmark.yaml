@@ -21,13 +21,13 @@ reservoir_params:
   n_ancilla: 4
   tau: 1.0
   seed: 17462
-  hx0_base: 1.0
-  hz1_base: 1.0
-  hx0_std: 1.0
-  hz1_std: 1.0
-  hx0_scale: 2.0
-  hz1_scale: 0.5
-  J_scale: 1.0
+  fixed_x_field_base: 1.0
+  input_z_field_base: 1.0
+  fixed_x_field_std: 1.0
+  input_z_field_std: 1.0
+  fixed_x_field_scale: 2.0
+  input_z_field_scale: 0.5
+  zz_coupling_scale: 1.0
 
 reservoir:
   kind: channel_map

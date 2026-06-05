@@ -15,8 +15,8 @@ except Exception:  # pragma: no cover
     phase_damping_error = None  # type: ignore
     depolarizing_error = None  # type: ignore
 
-EncodingType = Literal["rz_global", "rz_per_qubit", "hamiltonian_trotter"]
-ReservoirType = Literal["ising_like", "random_cx_rz", "pauli_evolution"]
+EncodingType = Literal["rz_global", "rz_per_qubit"]
+ReservoirType = Literal["random_cx_rz", "pauli_evolution"]
 EvolutionSynthesisType = Literal["default", "lie_trotter", "suzuki_trotter"]
 ReadoutType = Literal["z_local", "z_local_plus_anc", "pauli_k_local"]
 
@@ -79,7 +79,7 @@ class QRCConfig:
 
     n_system: int = 4
     n_ancilla: int = 2
-    reservoir_type: ReservoirType = "ising_like"
+    reservoir_type: ReservoirType = "pauli_evolution"
     H0_hamiltonian: Optional[Any] = None
     H1_hamiltonian: Optional[Any] = None
     evolution_synthesis: EvolutionSynthesisType = "lie_trotter"
@@ -90,7 +90,7 @@ class QRCConfig:
     depth_per_step: int = 1
     tau: float = 1.0
     seed: int = 1234
-    encoding: EncodingType = "hamiltonian_trotter"
+    encoding: EncodingType = "rz_global"
     input_scale: float = 1.0
     input_map: Literal["global", "per_qubit_random_sign"] = "global"
     use_purification: bool = True
@@ -109,7 +109,3 @@ class QRCConfig:
         """Return system plus ancilla qubit count."""
 
         return self.n_system + self.n_ancilla
-
-
-# Backward-compatible alias retained inside the forked codebase.
-NISQRCConfig = QRCConfig

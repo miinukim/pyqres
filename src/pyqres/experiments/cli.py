@@ -524,13 +524,13 @@ def run_symbol_channel_equalization_benchmark_from_cfg(cfg: DictConfig) -> Dict[
         n_ancilla=int(cfg.reservoir_params.n_ancilla),
         tau=float(cfg.reservoir_params.tau),
         seed=int(cfg.reservoir_params.seed),
-        hx0_base=float(cfg.reservoir_params.hx0_base),
-        hz1_base=float(cfg.reservoir_params.hz1_base),
-        hx0_std=float(cfg.reservoir_params.hx0_std),
-        hz1_std=float(cfg.reservoir_params.hz1_std),
-        hx0_scale=float(cfg.reservoir_params.hx0_scale),
-        hz1_scale=float(cfg.reservoir_params.hz1_scale),
-        J_scale=float(cfg.reservoir_params.J_scale),
+        fixed_x_field_base=float(cfg.reservoir_params.fixed_x_field_base),
+        input_z_field_base=float(cfg.reservoir_params.input_z_field_base),
+        fixed_x_field_std=float(cfg.reservoir_params.fixed_x_field_std),
+        input_z_field_std=float(cfg.reservoir_params.input_z_field_std),
+        fixed_x_field_scale=float(cfg.reservoir_params.fixed_x_field_scale),
+        input_z_field_scale=float(cfg.reservoir_params.input_z_field_scale),
+        zz_coupling_scale=float(cfg.reservoir_params.zz_coupling_scale),
     ).generate()
     reservoir = ChannelMapReservoir(
         ChannelMapReservoirConfig(
@@ -542,9 +542,8 @@ def run_symbol_channel_equalization_benchmark_from_cfg(cfg: DictConfig) -> Dict[
             use_shot_noise=bool(cfg.reservoir.use_shot_noise),
             shots=int(cfg.reservoir.shots),
             init_state=str(cfg.reservoir.init_state),
-            hx0_vec=reservoir_params["hx0_vec"],
-            hz1_vec=reservoir_params["hz1_vec"],
-            J_mat=reservoir_params["J_mat"],
+            H0_hamiltonian=reservoir_params["H0_hamiltonian"],
+            H1_hamiltonian=reservoir_params["H1_hamiltonian"],
             seed=int(cfg.reservoir.seed),
             control=MeasurementControlConfig(
                 measurement_mode=str(cfg.reservoir.control.measurement_mode),
