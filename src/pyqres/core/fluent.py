@@ -6,10 +6,11 @@ from dataclasses import replace
 from typing import Any, Sequence
 
 from pyqres.core.builders import compile_reservoir
+from pyqres.core.protocols import ReservoirBuilderProtocol
 from pyqres.core.specs import ReservoirSpec
 
 
-class ReservoirBuilder:
+class ReservoirBuilder(ReservoirBuilderProtocol):
     """Chainable builder for the common interactive pyqres workflow."""
 
     def __init__(self, family: str = "ising", spec: ReservoirSpec | None = None):

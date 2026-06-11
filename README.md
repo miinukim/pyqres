@@ -24,13 +24,19 @@ The package is organized around a few public layers:
 
 The main public protocols are re-exported from both `pyqres` and `pyqres.core`:
 
+- `ReservoirBuilderProtocol`: chainable reservoir construction.
 - `TransformReservoirProtocol`: exposes `transform(inputs) -> features`.
 - `StatefulReservoirProtocol`: adds `reset(...)` and `step(u)`.
 - `QRCReservoirProtocol`: legacy-compatible `reset`, `step`, and `run`.
 - `ChannelReservoirProtocol`: adds channel/PTM access.
 - `CircuitReservoirProtocol`: exposes circuit construction.
-- `DatasetProtocol`, `ReadoutProtocol`, `SerializableSpecProtocol`, and
-  `ExperimentResultProtocol`: contracts used by generic experiments.
+- `ReservoirSpecProtocol` and `SerializableSpecProtocol`: reservoir
+  specification contracts.
+- `DatasetSplitProtocol`, `DatasetProtocol`, `ReadoutProtocol`,
+  `ExperimentProtocol`, `ExperimentResultProtocol`, `SweepProtocol`, and
+  `SweepResultProtocol`: contracts used by generic experiments.
+- `SupervisedDataBuilderProtocol` and `TimeSeriesDataBuilderProtocol`:
+  contracts for `qres.data.*` helpers.
 
 For convenience, common APIs are re-exported from the top-level `pyqres`
 namespace. The implementation still lives in categorized packages:

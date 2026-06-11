@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from pyqres.core.reservoir_params import ReservoirParams
+from pyqres.core.protocols import InputSequence
 
 from pyqres.core.specs import ReadoutSpec, ReservoirSpec
 
@@ -132,7 +133,7 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     raise ValueError(f"Unsupported backend '{backend}'")
 
 
-def transform(reservoir: Any, inputs: np.ndarray | list[float] | tuple[float, ...]) -> np.ndarray:
+def transform(reservoir: Any, inputs: InputSequence) -> np.ndarray:
     """Run any pyqres-compatible reservoir on a stream."""
 
     if hasattr(reservoir, "transform"):

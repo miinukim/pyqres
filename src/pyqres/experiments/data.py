@@ -7,10 +7,11 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from pyqres.core.protocols import SupervisedDataBuilderProtocol, TimeSeriesDataBuilderProtocol
 from pyqres.experiments.datasets import Dataset, DatasetSplit
 
 
-class SupervisedDataBuilder:
+class SupervisedDataBuilder(SupervisedDataBuilderProtocol):
     """Deferred split builder for supervised input/target arrays."""
 
     def __init__(self, inputs: Sequence[float] | np.ndarray, targets: Sequence[float] | np.ndarray, metadata: Mapping[str, Any] | None = None):
@@ -33,7 +34,7 @@ class SupervisedDataBuilder:
         return Dataset.from_arrays(self.inputs, self.targets, washout=washout, train=train, test=test, metadata=self.metadata)
 
 
-class TimeSeriesDataBuilder:
+class TimeSeriesDataBuilder(TimeSeriesDataBuilderProtocol):
     """Deferred split builder for scalar forecasting series."""
 
     def __init__(self, series: Sequence[float] | np.ndarray, target_horizon: int = 1, metadata: Mapping[str, Any] | None = None):

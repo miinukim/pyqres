@@ -11,10 +11,10 @@ from typing import Any, Callable, Iterable, Mapping
 import numpy as np
 
 from pyqres.core.builders import compile_reservoir, transform
+from pyqres.core.protocols import DatasetProtocol, MetricCallable, ReadoutProtocol
 from pyqres.core.specs import ReservoirSpec
-from pyqres.experiments.datasets import Dataset
-from pyqres.experiments.metrics import Metric, resolve_metrics
-from pyqres.experiments.readout import ReadoutModel, Ridge
+from pyqres.experiments.metrics import resolve_metrics
+from pyqres.experiments.readout import Ridge
 
 
 @dataclass
@@ -47,9 +47,9 @@ class Experiment:
     """Run a reservoir on a generic supervised dataset and fit a readout."""
 
     reservoir: Any
-    dataset: Dataset
-    readout: ReadoutModel | None = None
-    metrics: Mapping[str, Metric] | list[str] | tuple[str, ...] | None = None
+    dataset: DatasetProtocol
+    readout: ReadoutProtocol | None = None
+    metrics: Mapping[str, MetricCallable] | list[str] | tuple[str, ...] | None = None
     metadata: Mapping[str, Any] | None = None
 
     def run(self) -> ExperimentResult:
@@ -110,11 +110,11 @@ class Sweep:
 
     def run(
         self,
-        dataset: Dataset,
+        dataset: DatasetProtocol,
         *,
         backend: str = "exact",
-        readout_factory: Callable[[], ReadoutModel] | None = None,
-        metrics: Mapping[str, Metric] | list[str] | tuple[str, ...] | None = None,
+        readout_factory: Callable[[], ReadoutProtocol] | None = None,
+        metrics: Mapping[str, MetricCallable] | list[str] | tuple[str, ...] | None = None,
     ) -> "SweepResult":
         """Run an Experiment for every spec in the sweep."""
 

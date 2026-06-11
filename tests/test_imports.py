@@ -1,20 +1,36 @@
 def test_core_imports():
     from pyqres.core import (
         ConfigMapping,
+        DatasetSplitProtocol,
         DatasetProtocol,
+        ExperimentProtocol,
         QRCReservoirProtocol,
         ReadoutProtocol,
+        ReservoirBuilderProtocol,
+        ReservoirSpecProtocol,
         ReservoirRunResult,
         ReservoirStepResult,
         SerializableSpecProtocol,
+        SupervisedDataBuilderProtocol,
+        SweepProtocol,
+        SweepResultProtocol,
+        TimeSeriesDataBuilderProtocol,
         TransformReservoirProtocol,
     )
 
     assert QRCReservoirProtocol is not None
     assert TransformReservoirProtocol is not None
+    assert DatasetSplitProtocol is not None
     assert DatasetProtocol is not None
+    assert ExperimentProtocol is not None
     assert ReadoutProtocol is not None
+    assert ReservoirBuilderProtocol is not None
+    assert ReservoirSpecProtocol is not None
     assert SerializableSpecProtocol is not None
+    assert SupervisedDataBuilderProtocol is not None
+    assert SweepProtocol is not None
+    assert SweepResultProtocol is not None
+    assert TimeSeriesDataBuilderProtocol is not None
     assert ConfigMapping is not None
     assert ReservoirRunResult is not None
     assert ReservoirStepResult is not None
@@ -202,14 +218,20 @@ def test_protocol_runtime_checks_and_dict_config(tmp_path):
     from pyqres import (
         Dataset,
         DatasetProtocol,
+        ExperimentProtocol,
         ReadoutProtocol,
+        ReservoirBuilderProtocol,
         ReservoirSpec,
+        ReservoirSpecProtocol,
         Ridge,
         SerializableSpecProtocol,
+        SupervisedDataBuilderProtocol,
+        TimeSeriesDataBuilderProtocol,
         TransformReservoirProtocol,
         compile_reservoir,
+        reservoir as reservoir_builder,
     )
-    from pyqres.experiments import run_experiment_from_config
+    from pyqres.experiments import Experiment, run_experiment_from_config
 
     inputs = np.linspace(-0.25, 0.25, 18)
     targets = np.roll(inputs, -1)
@@ -218,11 +240,20 @@ def test_protocol_runtime_checks_and_dict_config(tmp_path):
     spec = ReservoirSpec(family="ising", n_system=1, n_ancilla=1, tau=0.15, seed=6)
     reservoir = compile_reservoir(spec, backend="exact")
     readout = Ridge()
+    builder = reservoir_builder("ising")
+    experiment = Experiment(reservoir, dataset, readout=readout)
+    supervised_builder = __import__("pyqres").data.arrays(inputs[:-1], targets[:-1])
+    timeseries_builder = __import__("pyqres").data.timeseries(inputs)
 
     assert isinstance(dataset, DatasetProtocol)
     assert isinstance(spec, SerializableSpecProtocol)
+    assert isinstance(spec, ReservoirSpecProtocol)
     assert isinstance(reservoir, TransformReservoirProtocol)
     assert isinstance(readout, ReadoutProtocol)
+    assert isinstance(builder, ReservoirBuilderProtocol)
+    assert isinstance(experiment, ExperimentProtocol)
+    assert isinstance(supervised_builder, SupervisedDataBuilderProtocol)
+    assert isinstance(timeseries_builder, TimeSeriesDataBuilderProtocol)
 
     cfg = {
         "dataset": {
