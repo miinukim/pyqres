@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-"""Generic experiment CLI helpers.
+"""Generic pyqres experiment CLI."""
 
-Task-specific benchmark CLIs now live in the separate ``pyqres-tasks`` package.
-This module is intentionally small so core ``pyqres`` stays focused on generic
-reservoir construction, simulation, and analysis workflows.
-"""
-
+import argparse
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+from omegaconf import OmegaConf
 
 from pyqres import Dataset, Experiment, ReservoirSpec, Ridge, compile_reservoir
+from pyqres.experiments.common import run_experiment_from_config
 
 
 def run_array_experiment(
@@ -41,3 +39,28 @@ def save_features(path: str | Path, features: np.ndarray) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     np.save(out, np.asarray(features, dtype=float))
     return out
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config", help="Path to a generic pyqres experiment YAML file.")
+    parser.add_argument("--output-dir", default=None, help="Optional output directory override.")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
+    config_path = Path(args.config)
+    cfg = OmegaConf.load(config_path)
+    result = run_experiment_from_config(
+        cfg,
+        output_dir_override=args.output_dir,
+        base_dir=config_path.parent,
+    )
+    for split, metrics in result.metrics.items():
+        for name, value in metrics.items():
+            print(f"{split}_{name}: {value:.6g}")
+
+
+if __name__ == "__main__":
+    main()

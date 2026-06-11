@@ -3,6 +3,7 @@ from __future__ import annotations
 """Generic dataset containers for task-agnostic reservoir experiments."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -44,6 +45,25 @@ class DatasetSplit:
                 raise ValueError(f"{name} indices must be one-dimensional")
             if arr.size and (arr.min() < 0 or arr.max() >= n_samples):
                 raise ValueError(f"{name} indices are outside [0, {n_samples})")
+
+    def to_dict(self) -> dict[str, list[int]]:
+        """Return split indices as plain lists."""
+
+        return {
+            "washout": np.asarray(self.washout, dtype=int).tolist(),
+            "train": np.asarray(self.train, dtype=int).tolist(),
+            "test": np.asarray(self.test, dtype=int).tolist(),
+        }
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Sequence[int]]) -> "DatasetSplit":
+        """Build a split from explicit index arrays."""
+
+        return cls(
+            washout=np.asarray(data.get("washout", []), dtype=int),
+            train=np.asarray(data["train"], dtype=int),
+            test=np.asarray(data["test"], dtype=int),
+        )
 
 
 @dataclass(frozen=True)
@@ -90,6 +110,40 @@ class Dataset:
         return cls(inputs=x, targets=y, split=split_obj, metadata=dict(metadata or {}))
 
     @classmethod
+    def from_npz(
+        cls,
+        path: str | Path,
+        *,
+        inputs_key: str = "inputs",
+        targets_key: str = "targets",
+        split: DatasetSplit | Mapping[str, Sequence[int]] | None = None,
+        washout: int | None = None,
+        train: int | None = None,
+        test: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "Dataset":
+        """Load inputs/targets from an NPZ file."""
+
+        with np.load(Path(path), allow_pickle=False) as data:
+            inputs = np.asarray(data[inputs_key], dtype=float)
+            targets = np.asarray(data[targets_key], dtype=float)
+            if split is None and {"washout_indices", "train_indices", "test_indices"}.issubset(data.files):
+                split = {
+                    "washout": np.asarray(data["washout_indices"], dtype=int),
+                    "train": np.asarray(data["train_indices"], dtype=int),
+                    "test": np.asarray(data["test_indices"], dtype=int),
+                }
+        return cls.from_arrays(
+            inputs,
+            targets,
+            split=split,
+            washout=washout,
+            train=train,
+            test=test,
+            metadata=metadata,
+        )
+
+    @classmethod
     def timeseries(
         cls,
         series: Sequence[float] | np.ndarray,
@@ -127,3 +181,18 @@ class Dataset:
             raise ValueError(f"feature rows must match inputs, got {arr.shape[0]} and {self.inputs.shape[0]}")
         if not np.isfinite(arr).all():
             raise FloatingPointError("non-finite reservoir features")
+
+    def save_npz(self, path: str | Path) -> Path:
+        """Save inputs, targets, and split indices to a compressed NPZ file."""
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            out,
+            inputs=np.asarray(self.inputs, dtype=float),
+            targets=np.asarray(self.targets, dtype=float),
+            washout_indices=np.asarray(self.split.washout, dtype=int),
+            train_indices=np.asarray(self.split.train, dtype=int),
+            test_indices=np.asarray(self.split.test, dtype=int),
+        )
+        return out

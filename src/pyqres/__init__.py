@@ -9,7 +9,7 @@ from .core import (
     ReservoirStepResult,
 )
 from .datasets import Dataset, DatasetSplit
-from .experiment import Experiment, ExperimentResult, Sweep
+from .experiment import Experiment, ExperimentResult, Sweep, SweepResult
 from .readout import Ridge
 from .specs import ReadoutSpec, ReservoirSpec
 
@@ -27,6 +27,7 @@ __all__ = [
     "ReservoirStepResult",
     "Ridge",
     "Sweep",
+    "SweepResult",
     "build_dimension_model",
     "build_hamiltonian_params",
     "compile_reservoir",

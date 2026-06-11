@@ -99,6 +99,45 @@ print(result.metrics)
 The same `Dataset` and `Experiment` objects work with custom user tasks,
 `pyqres-tasks` presets, or data loaded from files.
 
+## Config-Driven Runs
+
+Core `pyqres` can run a generic supervised experiment from YAML without any
+task-specific code:
+
+```yaml
+dataset:
+  source: npz
+  path: dataset.npz
+  split:
+    washout: 20
+    train: 120
+    test: 40
+
+reservoir:
+  family: ising
+  n_system: 2
+  n_ancilla: 1
+  tau: 0.6
+
+backend: exact
+readout:
+  kind: ridge
+  l2: 1.0e-6
+metrics: [r2, mse]
+paths:
+  output_dir: outputs/example
+  timestamped: true
+```
+
+Run it with:
+
+```bash
+pyqres-run experiment.yaml
+```
+
+The runner writes `metrics.json`, `metadata.json`, and `arrays.npz` containing
+features and predictions.
+
 ## Reservoir Specs
 
 Reservoir construction can be described with `ReservoirSpec` and compiled into

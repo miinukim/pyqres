@@ -17,6 +17,7 @@ from typing import Any, TypeVar
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
+from pyqres import Dataset, Experiment, ReadoutSpec, ReservoirSpec, Ridge, compile_reservoir
 from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, MemoryObservableStreamingReservoir
 
 
@@ -119,3 +120,116 @@ def save_raw_dataset(outdir: Path, arrays: dict[str, np.ndarray], metadata: dict
     OmegaConf.save(cfg, outdir / "resolved_config.yaml", resolve=True)
     with (outdir / "metadata.json").open("w", encoding="utf-8") as f:
         json.dump(to_builtin(metadata), f, indent=2)
+
+
+def _mapping(cfg: DictConfig | dict[str, Any]) -> dict[str, Any]:
+    """Resolve OmegaConf or plain mappings into a mutable dict."""
+
+    if isinstance(cfg, DictConfig):
+        return dict(OmegaConf.to_container(cfg, resolve=True))
+    return dict(cfg)
+
+
+def dataset_from_config(cfg: DictConfig | dict[str, Any], base_dir: str | Path | None = None) -> Dataset:
+    """Build a generic Dataset from a config section.
+
+    Supported sources:
+    - arrays: inline inputs/targets
+    - npz: inputs/targets loaded from a compressed NPZ file
+    - timeseries: inline scalar series with a target horizon
+    """
+
+    raw = _mapping(cfg)
+    source = str(raw.get("source", "arrays")).lower()
+    split_cfg = raw.get("split")
+    metadata = raw.get("metadata", {})
+
+    def split_kwargs() -> dict[str, Any]:
+        if split_cfg is None:
+            return {}
+        if "indices" in split_cfg:
+            return {"split": split_cfg["indices"]}
+        return {
+            "washout": int(split_cfg.get("washout", 0)),
+            "train": int(split_cfg["train"]),
+            "test": int(split_cfg["test"]),
+        }
+
+    if source == "arrays":
+        return Dataset.from_arrays(raw["inputs"], raw["targets"], metadata=metadata, **split_kwargs())
+    if source == "timeseries":
+        return Dataset.timeseries(
+            raw["series"],
+            target_horizon=int(raw.get("target_horizon", 1)),
+            metadata=metadata,
+            **split_kwargs(),
+        )
+    if source == "npz":
+        path = Path(str(raw["path"]))
+        if not path.is_absolute() and base_dir is not None:
+            path = Path(base_dir) / path
+        return Dataset.from_npz(
+            path,
+            inputs_key=str(raw.get("inputs_key", "inputs")),
+            targets_key=str(raw.get("targets_key", "targets")),
+            metadata=metadata,
+            **split_kwargs(),
+        )
+    raise ValueError(f"Unsupported dataset source '{source}'")
+
+
+def reservoir_spec_from_config(cfg: DictConfig | dict[str, Any]) -> ReservoirSpec:
+    """Build a ReservoirSpec from a config section."""
+
+    raw = _mapping(cfg)
+    if "readout" in raw:
+        raw["readout"] = ReadoutSpec.from_mapping(raw["readout"])
+    return ReservoirSpec.from_mapping(raw)
+
+
+def readout_from_config(cfg: DictConfig | dict[str, Any] | None) -> Any:
+    """Build a readout model from config."""
+
+    raw = {} if cfg is None else _mapping(cfg)
+    kind = str(raw.get("kind", "ridge")).lower()
+    if kind == "ridge":
+        return Ridge(l2=float(raw.get("l2", 1e-6)), include_bias=bool(raw.get("include_bias", False)))
+    raise ValueError(f"Unsupported readout kind '{kind}'")
+
+
+def run_experiment_from_config(
+    cfg: DictConfig | dict[str, Any],
+    *,
+    output_dir_override: str | Path | None = None,
+    base_dir: str | Path | None = None,
+) -> Any:
+    """Run a generic pyqres Experiment from a config tree and save artifacts."""
+
+    raw = _mapping(cfg)
+    dataset = dataset_from_config(raw["dataset"], base_dir=base_dir)
+    spec = reservoir_spec_from_config(raw["reservoir"])
+    backend = str(raw.get("backend", "exact"))
+    readout = readout_from_config(raw.get("readout"))
+    metrics = raw.get("metrics")
+    reservoir = compile_reservoir(spec, backend=backend)
+    result = Experiment(
+        reservoir=reservoir,
+        dataset=dataset,
+        readout=readout,
+        metrics=metrics,
+        metadata={"backend": backend, "reservoir_spec": spec.to_dict()},
+    ).run()
+
+    paths = raw.get("paths", {})
+    if output_dir_override is not None:
+        outdir = Path(output_dir_override)
+    else:
+        outdir = Path(str(paths.get("output_dir", "outputs/pyqres_experiment")))
+        if not outdir.is_absolute() and base_dir is not None:
+            outdir = Path(base_dir) / outdir
+        if bool(paths.get("timestamped", True)):
+            outdir = outdir / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    result.save(outdir)
+    with (outdir / "resolved_config.json").open("w", encoding="utf-8") as handle:
+        json.dump(to_builtin(raw), handle, indent=2, sort_keys=True)
+    return result

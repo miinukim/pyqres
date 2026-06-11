@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Serializable public specifications for constructing reservoirs."""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
 
@@ -18,6 +18,26 @@ class ReadoutSpec:
     init_state: str = "maximally_mixed"
     use_shot_noise: bool = False
     shots: int = 4096
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ReadoutSpec":
+        """Build a readout spec from a plain mapping."""
+
+        if data is None:
+            return cls()
+        raw = dict(data)
+        if "custom" in raw and raw["custom"] is not None:
+            raw["custom"] = tuple(str(item) for item in raw["custom"])
+        return cls(**raw)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON/YAML-safe dictionary."""
+
+        out = asdict(self)
+        out["custom"] = list(self.custom)
+        if not isinstance(self.observables, str):
+            out["observables"] = list(self.observables)
+        return out
 
 
 @dataclass(frozen=True)
@@ -44,6 +64,25 @@ class ReservoirSpec:
         """Return a copy with selected fields replaced."""
 
         return replace(self, **updates)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "ReservoirSpec":
+        """Build a reservoir spec from a plain mapping."""
+
+        raw = dict(data)
+        raw["readout"] = ReadoutSpec.from_mapping(raw.get("readout"))
+        raw["model_kwargs"] = dict(raw.get("model_kwargs", {}))
+        raw["hamiltonian_kwargs"] = dict(raw.get("hamiltonian_kwargs", {}))
+        return cls(**raw)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON/YAML-safe dictionary."""
+
+        out = asdict(self)
+        out["readout"] = self.readout.to_dict()
+        out["model_kwargs"] = dict(self.model_kwargs)
+        out["hamiltonian_kwargs"] = dict(self.hamiltonian_kwargs)
+        return out
 
     @property
     def system_qubits(self) -> int:

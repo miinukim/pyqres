@@ -140,3 +140,43 @@ def test_generic_experiment_api_smoke():
     assert result.features.shape[0] == dataset.inputs.shape[0]
     assert "test" in result.metrics
     assert "r2" in result.metrics["test"]
+
+
+def test_dataset_save_load_and_config_runner(tmp_path):
+    import numpy as np
+    from omegaconf import OmegaConf
+
+    from pyqres import Dataset
+    from pyqres.experiments import run_experiment_from_config
+
+    inputs = np.linspace(-0.5, 0.5, 20)
+    targets = np.roll(inputs, -1)
+    dataset = Dataset.from_arrays(inputs[:-1], targets[:-1], washout=2, train=10, test=5)
+    npz_path = dataset.save_npz(tmp_path / "dataset.npz")
+
+    cfg = OmegaConf.create(
+        {
+            "dataset": {
+                "source": "npz",
+                "path": str(npz_path),
+                "split": {"washout": 2, "train": 10, "test": 5},
+            },
+            "reservoir": {
+                "family": "ising",
+                "n_system": 1,
+                "n_ancilla": 1,
+                "tau": 0.2,
+                "seed": 5,
+            },
+            "backend": "exact",
+            "readout": {"kind": "ridge", "l2": 1e-6},
+            "metrics": ["r2", "mse"],
+            "paths": {"output_dir": str(tmp_path / "run"), "timestamped": False},
+        }
+    )
+    result = run_experiment_from_config(cfg)
+
+    assert (tmp_path / "run" / "metrics.json").exists()
+    assert (tmp_path / "run" / "arrays.npz").exists()
+    assert "test" in result.metrics
+    assert "mse" in result.metrics["test"]
