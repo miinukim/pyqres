@@ -48,7 +48,7 @@ dev = [
 pyqres-run = "pyqres.experiments.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pyqres"]
+packages = ["src/pyqres", "src/qres"]
 include = ["src/pyqres/experiments/conf/**/*.yaml"]
 
 [tool.pytest.ini_options]

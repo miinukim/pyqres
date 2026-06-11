@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover
     depolarizing_error = None  # type: ignore
 
 EncodingType = Literal["rz_global", "rz_per_qubit"]
-ReservoirType = Literal["random_cx_rz", "pauli_evolution"]
+ReservoirType = Literal["random_cx_rz", "pauli_evolution", "custom_circuit"]
 EvolutionSynthesisType = Literal["default", "lie_trotter", "suzuki_trotter"]
 ReadoutType = Literal["z_local", "z_local_plus_anc", "pauli_k_local"]
 
@@ -80,6 +80,8 @@ class QRCConfig:
     n_system: int = 4
     n_ancilla: int = 2
     reservoir_type: ReservoirType = "pauli_evolution"
+    reservoir_circuit: Optional[Any] = None
+    reservoir_circuit_targets: Optional[tuple[int, ...]] = None
     H0_hamiltonian: Optional[Any] = None
     H1_hamiltonian: Optional[Any] = None
     evolution_synthesis: EvolutionSynthesisType = "lie_trotter"

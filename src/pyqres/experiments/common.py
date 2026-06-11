@@ -20,7 +20,15 @@ from omegaconf import DictConfig, OmegaConf
 from pyqres.core import ConfigMapping
 from pyqres.core.builders import compile_reservoir
 from pyqres.core.specs import ReservoirSpec
-from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, MemoryObservableStreamingReservoir
+from pyqres.dim import (
+    IsingReservoirModel,
+    IsingReservoirParameters,
+    MemoryObservableStreamingReservoir,
+    RandomPauliReservoirModel,
+    RandomPauliReservoirParameters,
+    SYKReservoirModel,
+    SYKReservoirParameters,
+)
 from pyqres.experiments.datasets import Dataset
 from pyqres.experiments.readout import Ridge
 from pyqres.experiments.runner import Experiment
@@ -81,9 +89,16 @@ def build_model(cfg: DictConfig) -> Any:
     """Build a supported reservoir model from a compact model config."""
 
     model_type = str(cfg.type).lower()
-    if model_type == "ising":
-        params = dataclass_from_config(IsingReservoirParameters, cfg.get("params", {}))
-        return IsingReservoirModel(params)
+    registry = {
+        "ising": (IsingReservoirParameters, IsingReservoirModel),
+        "random_pauli": (RandomPauliReservoirParameters, RandomPauliReservoirModel),
+        "randompauli": (RandomPauliReservoirParameters, RandomPauliReservoirModel),
+        "syk": (SYKReservoirParameters, SYKReservoirModel),
+    }
+    if model_type in registry:
+        parameter_cls, model_cls = registry[model_type]
+        params = dataclass_from_config(parameter_cls, cfg.get("params", {}))
+        return model_cls(params)
     raise ValueError(f"Unsupported model.type '{cfg.type}'")
 
 

@@ -1,35 +1,71 @@
 def test_core_imports():
     from pyqres.core import (
+        BackendLike,
+        BatchReservoirProtocol,
         ConfigMapping,
+        CircuitLike,
+        CircuitReservoirProtocol,
         DatasetSplitProtocol,
         DatasetProtocol,
+        DimensionModelProtocol,
         ExperimentProtocol,
+        HamiltonianLike,
+        HamiltonianSpecProtocol,
+        IndexSequence,
+        MemoryObservableReservoirProtocol,
         QRCReservoirProtocol,
+        ObservableSpec,
+        PauliTermLike,
+        ReadoutSpecProtocol,
         ReadoutProtocol,
         ReservoirBuilderProtocol,
+        ReservoirCompilerProtocol,
+        ReservoirFactoryProtocol,
         ReservoirSpecProtocol,
         ReservoirRunResult,
         ReservoirStepResult,
         SerializableSpecProtocol,
+        StepReservoirProtocol,
+        StreamingReservoirProtocol,
         SupervisedDataBuilderProtocol,
         SweepProtocol,
         SweepResultProtocol,
+        TaskDatasetFactoryProtocol,
+        TaskRunnerProtocol,
         TimeSeriesDataBuilderProtocol,
         TransformReservoirProtocol,
     )
 
+    assert BackendLike is not None
+    assert BatchReservoirProtocol is not None
+    assert CircuitLike is not None
+    assert CircuitReservoirProtocol is not None
     assert QRCReservoirProtocol is not None
     assert TransformReservoirProtocol is not None
+    assert DimensionModelProtocol is not None
+    assert HamiltonianLike is not None
+    assert HamiltonianSpecProtocol is not None
+    assert IndexSequence is not None
+    assert MemoryObservableReservoirProtocol is not None
+    assert ObservableSpec is not None
+    assert PauliTermLike is not None
+    assert ReadoutSpecProtocol is not None
     assert DatasetSplitProtocol is not None
     assert DatasetProtocol is not None
     assert ExperimentProtocol is not None
     assert ReadoutProtocol is not None
     assert ReservoirBuilderProtocol is not None
+    assert ReservoirCompilerProtocol is not None
+    assert ReservoirFactoryProtocol is not None
     assert ReservoirSpecProtocol is not None
     assert SerializableSpecProtocol is not None
+    assert StepReservoirProtocol is not None
+    assert StreamingReservoirProtocol is not None
     assert SupervisedDataBuilderProtocol is not None
     assert SweepProtocol is not None
     assert SweepResultProtocol is not None
+    assert TaskDatasetFactoryProtocol is not None
+    assert TaskRunnerProtocol is not None
     assert TimeSeriesDataBuilderProtocol is not None
     assert ConfigMapping is not None
     assert ReservoirRunResult is not None
@@ -216,21 +252,28 @@ def test_protocol_runtime_checks_and_dict_config(tmp_path):
     import numpy as np
 
     from pyqres import (
+        ChannelReservoirProtocol,
         Dataset,
         DatasetProtocol,
+        DimensionModelProtocol,
         ExperimentProtocol,
+        HamiltonianSpecProtocol,
+        MemoryObservableReservoirProtocol,
         ReadoutProtocol,
+        ReadoutSpecProtocol,
         ReservoirBuilderProtocol,
         ReservoirSpec,
         ReservoirSpecProtocol,
         Ridge,
         SerializableSpecProtocol,
+        StreamingReservoirProtocol,
         SupervisedDataBuilderProtocol,
         TimeSeriesDataBuilderProtocol,
         TransformReservoirProtocol,
         compile_reservoir,
         reservoir as reservoir_builder,
     )
+    from pyqres.core import ReservoirParams
     from pyqres.experiments import Experiment, run_experiment_from_config
 
     inputs = np.linspace(-0.25, 0.25, 18)
@@ -246,14 +289,34 @@ def test_protocol_runtime_checks_and_dict_config(tmp_path):
     timeseries_builder = __import__("pyqres").data.timeseries(inputs)
 
     assert isinstance(dataset, DatasetProtocol)
+    assert isinstance(spec.readout, ReadoutSpecProtocol)
     assert isinstance(spec, SerializableSpecProtocol)
     assert isinstance(spec, ReservoirSpecProtocol)
+    assert isinstance(reservoir, ChannelReservoirProtocol)
     assert isinstance(reservoir, TransformReservoirProtocol)
+    assert isinstance(reservoir, StreamingReservoirProtocol)
+    assert reservoir.ptm(0.0).shape == (4, 4)
     assert isinstance(readout, ReadoutProtocol)
     assert isinstance(builder, ReservoirBuilderProtocol)
     assert isinstance(experiment, ExperimentProtocol)
     assert isinstance(supervised_builder, SupervisedDataBuilderProtocol)
     assert isinstance(timeseries_builder, TimeSeriesDataBuilderProtocol)
+
+    memory_reservoir = (
+        reservoir_builder("ising")
+        .memory_qubits(1)
+        .readout_qubits(1)
+        .observables("z", count=1)
+        .backend("memory_observable")
+    )
+    assert isinstance(memory_reservoir, MemoryObservableReservoirProtocol)
+    assert isinstance(memory_reservoir.model, DimensionModelProtocol)
+
+    hamiltonian_spec = ReservoirParams.ising_type(
+        n_system=1,
+        n_ancilla=1,
+    ).generate()["H0_hamiltonian"]
+    assert isinstance(hamiltonian_spec, HamiltonianSpecProtocol)
 
     cfg = {
         "dataset": {
@@ -322,3 +385,138 @@ def test_fluent_array_data_and_ancilla_features():
 
     assert result.features.shape == (30, 3)
     assert "mse" in result.metrics["test"]
+
+
+def test_fluent_explicit_hamiltonian_is_not_preset_bound():
+    import numpy as np
+    import pyqres as qres
+
+    h0_terms = [(1.0, ((0, "X"),)), (0.3, ((0, "Z"), (1, "Z")))]
+    h1_terms = [(0.5, ((1, "Z"),))]
+    reservoir = (
+        qres.reservoir()
+        .memory_qubits(1)
+        .readout_qubits(1)
+        .hamiltonian(h0_terms=h0_terms, h1_terms=h1_terms)
+        .ancilla_probabilities(include_bias=False)
+        .backend("exact")
+    )
+    features = qres.transform(reservoir, np.array([0.0, 0.1, 0.2]))
+
+    assert features.shape == (3, 2)
+
+
+def test_dimension_presets_are_presets_not_core_families():
+    import numpy as np
+    import pyqres as qres
+
+    reservoir = (
+        qres.reservoir("random_pauli")
+        .memory_qubits(2)
+        .readout_qubits(1)
+        .model(depth=1, seed=3)
+        .observables("z", count=2)
+        .backend("memory_observable")
+    )
+    features = qres.transform(reservoir, np.array([0.0, 0.1, 0.2]))
+
+    assert features.shape == (3, 3)
+
+
+def test_builder_can_use_existing_reservoir_object():
+    import numpy as np
+    import pyqres as qres
+
+    class ExistingReservoir:
+        def transform(self, inputs):
+            x = np.asarray(inputs, dtype=float).reshape(-1, 1)
+            return np.hstack([np.ones_like(x), x])
+
+    reservoir = qres.reservoir().use(ExistingReservoir()).backend("exact")
+    features = qres.transform(reservoir, np.array([0.2, 0.4]))
+
+    assert features.tolist() == [[1.0, 0.2], [1.0, 0.4]]
+
+
+def test_custom_qiskit_circuit_reservoir_compiles():
+    import pytest
+    import pyqres as qres
+
+    from pyqres import CircuitReservoirProtocol
+
+    qiskit = pytest.importorskip("qiskit")
+
+    circuit = qiskit.QuantumCircuit(2)
+    circuit.h(0)
+    circuit.cx(0, 1)
+    reservoir = (
+        qres.reservoir()
+        .memory_qubits(1)
+        .readout_qubits(1)
+        .circuit(circuit)
+        .build()
+    )
+    assert isinstance(reservoir, CircuitReservoirProtocol)
+    executable = reservoir.build_executable_circuit([0.1], measure_system=False)
+
+    assert executable.num_qubits == 2
+
+
+def test_qresreservoir_from_dict_api():
+    import numpy as np
+
+    from qres import qresreservoir as short_factory
+    from pyqres import ReservoirBuilderProtocol, ReservoirFactoryProtocol, qresreservoir, transform
+
+    assert short_factory is qresreservoir
+    assert isinstance(qresreservoir, ReservoirFactoryProtocol)
+
+    builder = qresreservoir.builder_from_dict(
+        {
+            "preset": "Ising",
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "input": {"axis": "Z", "site": 0, "strength": 1.2},
+            "evolution": {"tau": 0.1},
+            "observables": {"preset": "z", "count": 1},
+            "backend": "exact",
+        }
+    )
+    assert isinstance(builder, ReservoirBuilderProtocol)
+
+    reservoir = qresreservoir.from_dict(
+        {
+            "preset": "Ising",
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "input": {"axis": "Z", "site": 0, "strength": 1.2},
+            "evolution": {"tau": 0.1},
+            "observables": {"preset": "z", "count": 1},
+            "backend": "exact",
+        }
+    )
+    features = transform(reservoir, np.array([0.0, 0.1, 0.2]))
+
+    assert features.shape == (3, 2)
+
+
+def test_qresreservoir_from_dict_explicit_hamiltonian():
+    import numpy as np
+
+    from pyqres import qresreservoir, transform
+
+    reservoir = qresreservoir.from_dict(
+        {
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "hamiltonian": {
+                "h0_terms": [(1.0, ((0, "X"),))],
+                "h1_terms": [(0.5, ((1, "Z"),))],
+            },
+            "readout": {"mode": "ancilla_probabilities", "include_bias": False},
+            "backend": "exact",
+        }
+    )
+    features = transform(reservoir, np.array([0.0, 0.1]))
+
+    assert features.shape == (2, 2)

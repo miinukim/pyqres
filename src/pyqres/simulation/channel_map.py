@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 
 import numpy as np
 
 from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
+
+
+_PAULI_1Q = {
+    "I": np.array([[1, 0], [0, 1]], dtype=complex),
+    "X": np.array([[0, 1], [1, 0]], dtype=complex),
+    "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
+    "Z": np.array([[1, 0], [0, -1]], dtype=complex),
+}
+
+
+def _kron_all(ops: list[np.ndarray]) -> np.ndarray:
+    out = np.array([[1.0 + 0.0j]])
+    for op in ops:
+        out = np.kron(out, op)
+    return out
+
+
+def _pauli_basis_matrices(n_qubits: int) -> tuple[np.ndarray, ...]:
+    return tuple(_kron_all([_PAULI_1Q[label] for label in labels]) for labels in product(("I", "X", "Y", "Z"), repeat=n_qubits))
 
 
 @dataclass
@@ -36,6 +56,9 @@ class ChannelMapReservoir:
         self.n = self.core.n
         self.rng = np.random.default_rng(cfg.seed)
         self._fixed_point_cache: np.ndarray | None = None
+        self._ptm_cache: dict[float, np.ndarray] = {}
+        self._memory_basis = _pauli_basis_matrices(self.nS)
+        self._memory_basis_stack = np.stack(self._memory_basis, axis=0)
         self.reset()
 
     def reset(self, rhoS0: np.ndarray | None = None) -> None:
@@ -48,7 +71,30 @@ class ChannelMapReservoir:
         self.rhoSE = np.kron(self.rhoS, self.core.ancilla_reset_density)
 
     def _memory_channel(self, u: float, op_memory: np.ndarray) -> np.ndarray:
-        return self.core.system_channel(float(u), np.asarray(op_memory, dtype=complex))
+        return self.channel(u, op_memory)
+
+    def channel(self, u: float, op_memory: np.ndarray) -> np.ndarray:
+        """Apply the induced memory channel to a memory operator."""
+
+        out = self.core.system_channel(float(u), np.asarray(op_memory, dtype=complex))
+        if not np.isfinite(out).all():
+            raise FloatingPointError("Non-finite output from channel-map memory channel.")
+        return out
+
+    def ptm(self, u: float) -> np.ndarray:
+        """Return the Pauli transfer matrix of the induced memory channel."""
+
+        key = float(u)
+        cached = self._ptm_cache.get(key)
+        if cached is not None:
+            return cached.copy()
+
+        outputs = np.stack([self.channel(key, basis_op) for basis_op in self._memory_basis], axis=0)
+        transfer = np.einsum("mab,nab->mn", self._memory_basis_stack.conj(), outputs, optimize=True) / self.core.dim_system
+        if not np.isfinite(transfer).all():
+            raise FloatingPointError("Non-finite PTM from channel-map reservoir.")
+        self._ptm_cache[key] = transfer
+        return transfer.copy()
 
     def fixed_point(self) -> np.ndarray:
         """Iterate the zero-input channel until a stationary memory state is found."""

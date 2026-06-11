@@ -135,7 +135,9 @@ class QRCReservoir:
 
         cfg = self.cfg
         n = cfg.total_qubits()
-        if cfg.reservoir_type == "random_cx_rz":
+        if cfg.reservoir_type == "custom_circuit":
+            self._apply_custom_circuit(qc)
+        elif cfg.reservoir_type == "random_cx_rz":
             for _ in range(cfg.depth_per_step):
                 # Shuffle pairings at each layer so the random-CX reservoir does
                 # not repeatedly couple the same neighboring indices.
@@ -147,6 +149,35 @@ class QRCReservoir:
                     qc.rz(float(self.rng.uniform(-np.pi, np.pi)), q)
         else:
             raise ValueError(f"Unknown reservoir_type: {cfg.reservoir_type}")
+
+    def _apply_custom_circuit(self, qc: "QuantumCircuit") -> None:
+        """Append a caller-supplied circuit as the fixed reservoir block."""
+
+        cfg = self.cfg
+        circuit = cfg.reservoir_circuit
+        if circuit is None:
+            raise ValueError("reservoir_circuit must be provided when reservoir_type='custom_circuit'.")
+        n_circuit = getattr(circuit, "num_qubits", None)
+        if n_circuit is None:
+            raise TypeError("reservoir_circuit must expose num_qubits.")
+        targets = cfg.reservoir_circuit_targets
+        if targets is None:
+            if int(n_circuit) != cfg.total_qubits():
+                raise ValueError(
+                    "A custom reservoir circuit without explicit targets must use all "
+                    f"{cfg.total_qubits()} qubits; got {n_circuit}."
+                )
+            targets = tuple(range(cfg.total_qubits()))
+        else:
+            targets = tuple(int(item) for item in targets)
+            if len(targets) != int(n_circuit):
+                raise ValueError(
+                    f"reservoir_circuit_targets has length {len(targets)}, expected {n_circuit}."
+                )
+            if len(set(targets)) != len(targets) or any(t < 0 or t >= cfg.total_qubits() for t in targets):
+                raise ValueError(f"Invalid reservoir_circuit_targets {targets}.")
+        instruction = circuit.to_instruction() if hasattr(circuit, "to_instruction") else circuit
+        qc.append(instruction, list(targets))
 
     def _apply_purification_entangle(self, qc: "QuantumCircuit") -> None:
         """Entangle system and ancilla qubits before ancilla measurement."""
