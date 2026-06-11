@@ -68,42 +68,64 @@ Install benchmark task presets separately:
 python -m pip install -e ../pyqres-tasks
 ```
 
-## Generic Workflow
+## Reservoir-First Workflow
 
-Use `pyqres` with arbitrary arrays or externally generated datasets:
+The primary interface is a small Python workflow: build a reservoir, pass data
+through it, and optionally fit a readout.
 
 ```python
 import numpy as np
 import pyqres as qres
 
-inputs = np.linspace(-1.0, 1.0, 200)
-targets = np.roll(inputs, -1)
+series = np.sin(np.linspace(0.0, 12.0, 1000))
 
-dataset = qres.Dataset.from_arrays(
-    inputs[:-1],
-    targets[:-1],
+reservoir = (
+    qres.reservoir("ising")
+    .memory_qubits(5)
+    .readout_qubits(2)
+    .input("Z", site=0, strength=1.2)
+    .evolution(tau=0.6)
+    .observables("rich", count=8)
+    .backend("exact")
+)
+
+dataset = qres.data.timeseries(series, target_horizon=1).split(
+    washout=100,
+    train=600,
+    test=250,
+)
+
+result = qres.Experiment(
+    reservoir=reservoir,
+    dataset=dataset,
+    readout=qres.readout.Ridge(l2=1e-6),
+    metrics=["r2", "mse"],
+).run()
+
+print(result.metrics)
+```
+
+For direct supervised arrays:
+
+```python
+inputs = np.linspace(-1.0, 1.0, 200)
+targets = inputs**2
+
+dataset = qres.data.arrays(inputs, targets).split(
     washout=20,
     train=120,
     test=40,
 )
 
-spec = qres.ReservoirSpec(
-    family="ising",
-    n_system=2,
-    n_ancilla=1,
-    tau=0.6,
-    input_scale=1.0,
+reservoir = (
+    qres.reservoir("ising")
+    .memory_qubits(2)
+    .readout_qubits(1)
+    .ancilla_probabilities()
+    .backend("exact")
 )
 
-reservoir = qres.compile_reservoir(spec, backend="exact")
-result = qres.Experiment(
-    reservoir=reservoir,
-    dataset=dataset,
-    readout=qres.Ridge(l2=1e-6),
-    metrics=["r2", "mse"],
-).run()
-
-print(result.metrics)
+result = qres.Experiment(reservoir, dataset, readout=qres.readout.Ridge()).run()
 ```
 
 The same `Dataset` and `Experiment` objects work with custom user tasks,
@@ -165,8 +187,8 @@ result = run_experiment_from_config({
 
 ## Reservoir Specs
 
-Reservoir construction can be described with `ReservoirSpec` and compiled into
-different backends:
+The fluent API builds `ReservoirSpec` objects internally. For lower-level
+workflows, specs can still be created and compiled directly:
 
 ```python
 spec = qres.ReservoirSpec(family="ising", n_system=3, n_ancilla=1, tau=0.8)

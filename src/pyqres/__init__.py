@@ -1,5 +1,6 @@
 """Unified namespace for task-agnostic quantum reservoir computing tools."""
 
+from . import data, readout
 from .builders import build_dimension_model, build_hamiltonian_params, compile_reservoir, transform
 from .core import (
     ChannelReservoirProtocol,
@@ -18,6 +19,7 @@ from .core import (
 )
 from .datasets import Dataset, DatasetSplit
 from .experiment import Experiment, ExperimentResult, Sweep, SweepResult
+from .fluent import ReservoirBuilder, reservoir
 from .readout import Ridge
 from .specs import ReadoutSpec, ReservoirSpec
 
@@ -38,6 +40,7 @@ __all__ = [
     "ReservoirRunResult",
     "ReservoirSpec",
     "ReservoirStepResult",
+    "ReservoirBuilder",
     "Ridge",
     "SerializableSpecProtocol",
     "StatefulReservoirProtocol",
@@ -47,5 +50,8 @@ __all__ = [
     "build_dimension_model",
     "build_hamiltonian_params",
     "compile_reservoir",
+    "data",
+    "readout",
+    "reservoir",
     "transform",
 ]

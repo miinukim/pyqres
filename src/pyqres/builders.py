@@ -61,6 +61,8 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     """Compile a ReservoirSpec into an executable reservoir."""
 
     backend_key = backend.lower()
+    if backend_key in {"exact", "dense"} and spec.readout.mode in {"memory_observables", "observables"}:
+        backend_key = "memory_observable"
     readout = spec.readout
     if backend_key in {"exact", "channel_map"}:
         from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig

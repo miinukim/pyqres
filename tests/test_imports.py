@@ -239,3 +239,55 @@ def test_protocol_runtime_checks_and_dict_config(tmp_path):
 
     assert (tmp_path / "dict_run" / "metrics.json").exists()
     assert "r2" in result.metrics["test"]
+
+
+def test_fluent_reservoir_data_experiment_path():
+    import numpy as np
+    import pyqres as qres
+
+    series = np.sin(np.linspace(0.0, 2.0, 48))
+    reservoir = (
+        qres.reservoir("ising")
+        .memory_qubits(2)
+        .readout_qubits(1)
+        .input("Z", site=0, strength=1.2)
+        .evolution(tau=0.2)
+        .observables("rich", count=3)
+        .backend("exact")
+    )
+    dataset = qres.data.timeseries(series, target_horizon=1).split(
+        washout=4,
+        train=24,
+        test=12,
+    )
+    result = qres.Experiment(
+        reservoir=reservoir,
+        dataset=dataset,
+        readout=qres.readout.Ridge(l2=1e-6),
+        metrics=["r2", "mse"],
+    ).run()
+
+    assert result.features.shape == (47, 4)
+    assert "r2" in result.metrics["test"]
+    assert "mse" in result.metrics["test"]
+
+
+def test_fluent_array_data_and_ancilla_features():
+    import numpy as np
+    import pyqres as qres
+
+    inputs = np.linspace(-1.0, 1.0, 30)
+    targets = inputs**2
+    reservoir = (
+        qres.reservoir("ising")
+        .memory_qubits(1)
+        .readout_qubits(1)
+        .evolution(tau=0.1)
+        .ancilla_probabilities(include_bias=True)
+        .backend("exact")
+    )
+    dataset = qres.data.arrays(inputs, targets).split(washout=3, train=18, test=8)
+    result = qres.Experiment(reservoir, dataset, readout=qres.readout.Ridge(), metrics=["mse"]).run()
+
+    assert result.features.shape == (30, 3)
+    assert "mse" in result.metrics["test"]
