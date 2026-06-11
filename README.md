@@ -10,17 +10,15 @@ legacy task-integrated code line is preserved on the `release/v0.1.x` branch.
 
 ## Design
 
-The core package is organized around a few public layers:
+The package is organized around a few public layers:
 
-- `pyqres.core`: backend-neutral Hamiltonian and protocol objects.
+- `pyqres.core`: backend-neutral Hamiltonian objects, reservoir specs,
+  reservoir construction, fluent reservoir builders, and protocols.
 - `pyqres.simulation`: dense exact and finite-shot trajectory reservoirs.
 - `pyqres.qiskit`: Qiskit circuit reservoirs.
 - `pyqres.dim`: PTM, Volterra, visibility, and sweep-analysis tools.
-- `pyqres.datasets`: generic array/time-series dataset containers.
-- `pyqres.readout`: generic readout models such as ridge regression.
-- `pyqres.experiment`: task-agnostic experiment and sweep runners.
-- `pyqres.specs` and `pyqres.builders`: serializable reservoir specs and
-  backend compilation helpers.
+- `pyqres.experiments`: generic datasets, data builders, readouts, metrics,
+  experiment runners, result objects, sweeps, and config-driven execution.
 - `pyqres.baselines`: classical model utilities that can be used by external
   tasks or comparison studies.
 
@@ -33,6 +31,15 @@ The main public protocols are re-exported from both `pyqres` and `pyqres.core`:
 - `CircuitReservoirProtocol`: exposes circuit construction.
 - `DatasetProtocol`, `ReadoutProtocol`, `SerializableSpecProtocol`, and
   `ExperimentResultProtocol`: contracts used by generic experiments.
+
+For convenience, common APIs are re-exported from the top-level `pyqres`
+namespace. The implementation still lives in categorized packages:
+
+- `qres.reservoir(...)` -> `pyqres.core.fluent`
+- `qres.compile_reservoir(...)` -> `pyqres.core.builders`
+- `qres.ReservoirSpec` -> `pyqres.core.specs`
+- `qres.data.*`, `qres.readout.*`, and `qres.Experiment` ->
+  `pyqres.experiments`
 
 The central Hamiltonian convention remains:
 

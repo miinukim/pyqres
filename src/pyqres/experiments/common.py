@@ -17,8 +17,13 @@ from typing import Any, TypeVar
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
-from pyqres import ConfigMapping, Dataset, Experiment, ReservoirSpec, Ridge, compile_reservoir
+from pyqres.core import ConfigMapping
+from pyqres.core.builders import compile_reservoir
+from pyqres.core.specs import ReservoirSpec
 from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, MemoryObservableStreamingReservoir
+from pyqres.experiments.datasets import Dataset
+from pyqres.experiments.readout import Ridge
+from pyqres.experiments.runner import Experiment
 
 
 T = TypeVar("T")

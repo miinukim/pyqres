@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Small public preset registry for common reservoir specs."""
 
-from .specs import ReadoutSpec, ReservoirSpec
+from pyqres.core.specs import ReadoutSpec, ReservoirSpec
 
 
 def ising_memory_readout(

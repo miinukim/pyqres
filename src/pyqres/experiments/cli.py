@@ -9,7 +9,11 @@ from typing import Any
 import numpy as np
 from omegaconf import OmegaConf
 
-from pyqres import Dataset, Experiment, ReservoirSpec, Ridge, compile_reservoir
+from pyqres.core.builders import compile_reservoir
+from pyqres.core.specs import ReservoirSpec
+from pyqres.experiments.datasets import Dataset
+from pyqres.experiments.readout import Ridge
+from pyqres.experiments.runner import Experiment
 from pyqres.experiments.common import run_experiment_from_config
 
 
