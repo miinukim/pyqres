@@ -130,10 +130,11 @@ Hamiltonians, measurement protocols, Qiskit transpilation, or Volterra analysis.
 Task presets now live outside core `pyqres`:
 
 ```python
-from pyqres_tasks import MackeyGlassConfig, generate_mackey_glass_series
+from pyqres_tasks import MackeyGlassConfig, mackey_glass_dataset
 
-series = generate_mackey_glass_series(MackeyGlassConfig(T_total=600))
-dataset = qres.Dataset.timeseries(series, target_horizon=1, washout=50, train=350, test=150)
+dataset = mackey_glass_dataset(
+    MackeyGlassConfig(T_total=600, washout=50, train_len=350, test_len=150)
+)
 ```
 
 This keeps `pyqres` focused on reservoir construction and analysis while still
