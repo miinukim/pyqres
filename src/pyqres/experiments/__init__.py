@@ -14,7 +14,6 @@ from pyqres.dim import (
 from .common import (
     build_memory_observable_reservoir,
     build_model,
-    build_task_config,
     dataclass_from_config,
     resolve_output_dir,
     save_raw_dataset,
@@ -30,7 +29,6 @@ __all__ = [
     "build_memory_observable_reservoir",
     "build_model",
     "build_sweep",
-    "build_task_config",
     "dataclass_from_config",
     "resolve_output_dir",
     "run_standard_analysis_sweep",

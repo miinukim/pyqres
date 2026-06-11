@@ -1,4 +1,4 @@
-"""Internal numerical utilities used by pyqres task and baseline modules."""
+"""Internal numerical utilities used by pyqres readout and baseline modules."""
 
 from .linear import ridge_regression_fit, ridge_regression_predict, r2_score, rmse
 

@@ -99,3 +99,8 @@ class ChannelMapReservoir:
 
     def run_stream(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
         return self.run(inputs)
+
+    def transform(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
+        """Scikit-style alias used by the generic experiment API."""
+
+        return self.run_stream(inputs)

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Reusable helpers for compact pyqres experiment scripts.
 
-The functions here handle config-to-dataclass mapping, model/task construction,
+The functions here handle config-to-dataclass mapping, model construction,
 observable-readout selection, output directory resolution, and raw array saving.
-They intentionally avoid plotting and sweep logic so simple experiment scripts
-can stay focused on model and task specification.
+They intentionally avoid plotting and sweep logic so scripts can stay focused
+on reservoir and dataset specification.
 """
 
 from dataclasses import fields, is_dataclass
@@ -18,7 +18,6 @@ import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, MemoryObservableStreamingReservoir
-from pyqres.tasks import MackeyGlassConfig
 
 
 T = TypeVar("T")
@@ -80,15 +79,6 @@ def build_model(cfg: DictConfig) -> Any:
         params = dataclass_from_config(IsingReservoirParameters, cfg.get("params", {}))
         return IsingReservoirModel(params)
     raise ValueError(f"Unsupported model.type '{cfg.type}'")
-
-
-def build_task_config(cfg: DictConfig) -> Any:
-    """Build a supported task dataclass from a compact task config."""
-
-    task_type = str(cfg.type).lower()
-    if task_type == "mackey_glass":
-        return dataclass_from_config(MackeyGlassConfig, cfg.get("params", {}))
-    raise ValueError(f"Unsupported task.type '{cfg.type}'")
 
 
 def select_observable_specs(model: Any, cfg: DictConfig) -> list[str]:

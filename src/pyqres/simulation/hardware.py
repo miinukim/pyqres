@@ -59,3 +59,8 @@ class HardwareTrajectoryReservoir:
         if not np.isfinite(x).all():
             raise FloatingPointError("Non-finite features from hardware trajectory reservoir.")
         return x
+
+    def transform(self, inputs: Sequence[float]) -> np.ndarray:
+        """Scikit-style alias used by the generic experiment API."""
+
+        return self.run_stream(inputs)

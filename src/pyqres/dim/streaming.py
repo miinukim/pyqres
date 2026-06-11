@@ -1,4 +1,4 @@
-"""Streaming task adapter built on the exact dense QRC core."""
+"""Streaming adapters built on exact dense and dimension-analysis QRC cores."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ class SharedExactStreamingReservoir:
         preset: str = "z",
         custom_specs: Sequence[str] | None = None,
     ) -> List[str]:
-        """Return named observable presets used by task-side readout modes."""
+        """Return named observable presets used by streaming readout modes."""
 
         preset_key = preset.lower()
         if preset_key == "z":
@@ -185,12 +185,17 @@ class SharedExactStreamingReservoir:
             raise FloatingPointError("Non-finite features from shared exact streaming reservoir.")
         return x
 
+    def transform(self, inputs: Sequence[float]) -> np.ndarray:
+        """Scikit-style alias used by the generic experiment API."""
+
+        return self.run_stream(inputs)
+
 
 class MemoryObservableStreamingReservoir:
-    """Stream task features from any pyqres dimension-analysis reservoir model.
+    """Stream features from any pyqres dimension-analysis reservoir model.
 
     The adapter applies the model's memory channel at each scalar input and emits
-    expectation values of chosen memory observables. It is useful when a task
+    expectation values of chosen memory observables. It is useful when an
     experiment should use the same reservoir model and observables as the
     Volterra visibility analysis.
     """
@@ -249,6 +254,11 @@ class MemoryObservableStreamingReservoir:
         self.reset()
         features = np.vstack([self.step(float(u)) for u in inputs])
         return ensure_finite("memory-observable streaming feature matrix", features)
+
+    def transform(self, inputs: Sequence[float]) -> np.ndarray:
+        """Scikit-style alias used by the generic experiment API."""
+
+        return self.run_stream(inputs)
 
 
 __all__ = [

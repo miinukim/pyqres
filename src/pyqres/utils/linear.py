@@ -1,5 +1,5 @@
 from __future__ import annotations
-"""Small linear-regression utilities used by tasks and baselines."""
+"""Small linear-regression utilities used by readouts and baselines."""
 
 import numpy as np
 

@@ -10,8 +10,8 @@ def test_public_imports():
     from pyqres.simulation import ExactQRCModelConfig
     from pyqres.qiskit import QRCReservoir
     from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, QRCLibExactReservoirModel
-    from pyqres.tasks import STMConfig
     from pyqres.baselines import ESNConfig
+    from pyqres import Dataset, Experiment, ReservoirSpec, Ridge
 
     assert ExactQRCModelConfig is not None
     assert QRCReservoir is not None
@@ -20,8 +20,11 @@ def test_public_imports():
     assert ising_model.h0.shape == ising_model.h1.shape
     assert not hasattr(ising_model, "v")
     assert QRCLibExactReservoirModel is not None
-    assert STMConfig is not None
     assert ESNConfig is not None
+    assert Dataset is not None
+    assert Experiment is not None
+    assert ReservoirSpec is not None
+    assert Ridge is not None
 
 
 def test_simulation_and_dim_smoke():
@@ -120,3 +123,20 @@ def test_qiskit_hamiltonian_like_inputs():
     assert isinstance(params["H0_hamiltonian"].to_sparse_pauli_op(), qi.SparsePauliOp)
     model = ExactQRCModel(ExactQRCModelConfig(**params))
     assert model.unitary(0.25).shape == (4, 4)
+
+
+def test_generic_experiment_api_smoke():
+    import numpy as np
+
+    from pyqres import Dataset, Experiment, ReservoirSpec, Ridge, compile_reservoir
+
+    inputs = np.linspace(-0.5, 0.5, 24)
+    targets = np.roll(inputs, -1)
+    dataset = Dataset.from_arrays(inputs[:-1], targets[:-1], washout=2, train=12, test=6)
+    spec = ReservoirSpec(family="ising", n_system=1, n_ancilla=1, tau=0.2, seed=1)
+    reservoir = compile_reservoir(spec, backend="exact")
+    result = Experiment(reservoir=reservoir, dataset=dataset, readout=Ridge(l2=1e-6), metrics=["r2"]).run()
+
+    assert result.features.shape[0] == dataset.inputs.shape[0]
+    assert "test" in result.metrics
+    assert "r2" in result.metrics["test"]
