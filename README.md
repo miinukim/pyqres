@@ -539,6 +539,14 @@ Files and capabilities:
   - run_experiment_from_cfg: programmatic config runner.
   - run_symbol_channel_equalization_benchmark_from_cfg: programmatic SNR sweep.
 
+- experiments/common.py
+  - dataclass_from_config: maps config sections into dataclass instances.
+  - build_model and build_task_config: build supported model and task objects.
+  - build_memory_observable_reservoir: selects observables and builds the
+    memory-observable task reservoir.
+  - resolve_output_dir and save_raw_dataset: handle raw dataset output without
+    plotting or sweep logic.
+
 - experiments/conf/config.yaml
   - Default config for the general runner.
 
