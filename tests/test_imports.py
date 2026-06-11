@@ -1,7 +1,21 @@
 def test_core_imports():
-    from pyqres.core import QRCReservoirProtocol, ReservoirRunResult, ReservoirStepResult
+    from pyqres.core import (
+        ConfigMapping,
+        DatasetProtocol,
+        QRCReservoirProtocol,
+        ReadoutProtocol,
+        ReservoirRunResult,
+        ReservoirStepResult,
+        SerializableSpecProtocol,
+        TransformReservoirProtocol,
+    )
 
     assert QRCReservoirProtocol is not None
+    assert TransformReservoirProtocol is not None
+    assert DatasetProtocol is not None
+    assert ReadoutProtocol is not None
+    assert SerializableSpecProtocol is not None
+    assert ConfigMapping is not None
     assert ReservoirRunResult is not None
     assert ReservoirStepResult is not None
 
@@ -180,3 +194,48 @@ def test_dataset_save_load_and_config_runner(tmp_path):
     assert (tmp_path / "run" / "arrays.npz").exists()
     assert "test" in result.metrics
     assert "mse" in result.metrics["test"]
+
+
+def test_protocol_runtime_checks_and_dict_config(tmp_path):
+    import numpy as np
+
+    from pyqres import (
+        Dataset,
+        DatasetProtocol,
+        ReadoutProtocol,
+        ReservoirSpec,
+        Ridge,
+        SerializableSpecProtocol,
+        TransformReservoirProtocol,
+        compile_reservoir,
+    )
+    from pyqres.experiments import run_experiment_from_config
+
+    inputs = np.linspace(-0.25, 0.25, 18)
+    targets = np.roll(inputs, -1)
+    dataset = Dataset.from_arrays(inputs[:-1], targets[:-1], washout=2, train=9, test=4)
+    data_path = dataset.save_npz(tmp_path / "dict_dataset.npz")
+    spec = ReservoirSpec(family="ising", n_system=1, n_ancilla=1, tau=0.15, seed=6)
+    reservoir = compile_reservoir(spec, backend="exact")
+    readout = Ridge()
+
+    assert isinstance(dataset, DatasetProtocol)
+    assert isinstance(spec, SerializableSpecProtocol)
+    assert isinstance(reservoir, TransformReservoirProtocol)
+    assert isinstance(readout, ReadoutProtocol)
+
+    cfg = {
+        "dataset": {
+            "source": "npz",
+            "path": str(data_path),
+        },
+        "reservoir": spec.to_dict(),
+        "backend": "exact",
+        "readout": {"kind": "ridge", "l2": 1e-6},
+        "metrics": ["r2"],
+        "paths": {"output_dir": str(tmp_path / "dict_run"), "timestamped": False},
+    }
+    result = run_experiment_from_config(cfg)
+
+    assert (tmp_path / "dict_run" / "metrics.json").exists()
+    assert "r2" in result.metrics["test"]

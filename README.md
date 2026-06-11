@@ -24,6 +24,16 @@ The core package is organized around a few public layers:
 - `pyqres.baselines`: classical model utilities that can be used by external
   tasks or comparison studies.
 
+The main public protocols are re-exported from both `pyqres` and `pyqres.core`:
+
+- `TransformReservoirProtocol`: exposes `transform(inputs) -> features`.
+- `StatefulReservoirProtocol`: adds `reset(...)` and `step(u)`.
+- `QRCReservoirProtocol`: legacy-compatible `reset`, `step`, and `run`.
+- `ChannelReservoirProtocol`: adds channel/PTM access.
+- `CircuitReservoirProtocol`: exposes circuit construction.
+- `DatasetProtocol`, `ReadoutProtocol`, `SerializableSpecProtocol`, and
+  `ExperimentResultProtocol`: contracts used by generic experiments.
+
 The central Hamiltonian convention remains:
 
 ```text
@@ -137,6 +147,21 @@ pyqres-run experiment.yaml
 
 The runner writes `metrics.json`, `metadata.json`, and `arrays.npz` containing
 features and predictions.
+
+The same configuration can be submitted directly as a Python dictionary:
+
+```python
+from pyqres.experiments import run_experiment_from_config
+
+result = run_experiment_from_config({
+    "dataset": {"source": "npz", "path": "dataset.npz"},
+    "reservoir": {"family": "ising", "n_system": 2, "n_ancilla": 1, "tau": 0.6},
+    "backend": "exact",
+    "readout": {"kind": "ridge", "l2": 1.0e-6},
+    "metrics": ["r2", "mse"],
+    "paths": {"output_dir": "outputs/example", "timestamped": False},
+})
+```
 
 ## Reservoir Specs
 

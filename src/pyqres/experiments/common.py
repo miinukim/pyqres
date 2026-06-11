@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
-from pyqres import Dataset, Experiment, ReadoutSpec, ReservoirSpec, Ridge, compile_reservoir
+from pyqres import ConfigMapping, Dataset, Experiment, ReservoirSpec, Ridge, compile_reservoir
 from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, MemoryObservableStreamingReservoir
 
 
@@ -40,7 +40,7 @@ def to_builtin(obj: Any) -> Any:
     return obj
 
 
-def dataclass_from_config(dataclass_type: type[T], cfg: DictConfig | dict[str, Any] | None) -> T:
+def dataclass_from_config(dataclass_type: type[T], cfg: DictConfig | ConfigMapping | None) -> T:
     """Instantiate a dataclass using only fields present on that dataclass."""
 
     if not is_dataclass(dataclass_type):
@@ -122,7 +122,7 @@ def save_raw_dataset(outdir: Path, arrays: dict[str, np.ndarray], metadata: dict
         json.dump(to_builtin(metadata), f, indent=2)
 
 
-def _mapping(cfg: DictConfig | dict[str, Any]) -> dict[str, Any]:
+def _mapping(cfg: DictConfig | ConfigMapping) -> dict[str, Any]:
     """Resolve OmegaConf or plain mappings into a mutable dict."""
 
     if isinstance(cfg, DictConfig):
@@ -130,7 +130,7 @@ def _mapping(cfg: DictConfig | dict[str, Any]) -> dict[str, Any]:
     return dict(cfg)
 
 
-def dataset_from_config(cfg: DictConfig | dict[str, Any], base_dir: str | Path | None = None) -> Dataset:
+def dataset_from_config(cfg: DictConfig | ConfigMapping, base_dir: str | Path | None = None) -> Dataset:
     """Build a generic Dataset from a config section.
 
     Supported sources:
@@ -178,16 +178,14 @@ def dataset_from_config(cfg: DictConfig | dict[str, Any], base_dir: str | Path |
     raise ValueError(f"Unsupported dataset source '{source}'")
 
 
-def reservoir_spec_from_config(cfg: DictConfig | dict[str, Any]) -> ReservoirSpec:
+def reservoir_spec_from_config(cfg: DictConfig | ConfigMapping) -> ReservoirSpec:
     """Build a ReservoirSpec from a config section."""
 
     raw = _mapping(cfg)
-    if "readout" in raw:
-        raw["readout"] = ReadoutSpec.from_mapping(raw["readout"])
     return ReservoirSpec.from_mapping(raw)
 
 
-def readout_from_config(cfg: DictConfig | dict[str, Any] | None) -> Any:
+def readout_from_config(cfg: DictConfig | ConfigMapping | None) -> Any:
     """Build a readout model from config."""
 
     raw = {} if cfg is None else _mapping(cfg)
@@ -198,7 +196,7 @@ def readout_from_config(cfg: DictConfig | dict[str, Any] | None) -> Any:
 
 
 def run_experiment_from_config(
-    cfg: DictConfig | dict[str, Any],
+    cfg: DictConfig | ConfigMapping,
     *,
     output_dir_override: str | Path | None = None,
     base_dir: str | Path | None = None,

@@ -20,11 +20,13 @@ class ReadoutSpec:
     shots: int = 4096
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ReadoutSpec":
+    def from_mapping(cls, data: Mapping[str, Any] | "ReadoutSpec" | None) -> "ReadoutSpec":
         """Build a readout spec from a plain mapping."""
 
         if data is None:
             return cls()
+        if isinstance(data, cls):
+            return data
         raw = dict(data)
         if "custom" in raw and raw["custom"] is not None:
             raw["custom"] = tuple(str(item) for item in raw["custom"])
@@ -66,9 +68,11 @@ class ReservoirSpec:
         return replace(self, **updates)
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> "ReservoirSpec":
+    def from_mapping(cls, data: Mapping[str, Any] | "ReservoirSpec") -> "ReservoirSpec":
         """Build a reservoir spec from a plain mapping."""
 
+        if isinstance(data, cls):
+            return data
         raw = dict(data)
         raw["readout"] = ReadoutSpec.from_mapping(raw.get("readout"))
         raw["model_kwargs"] = dict(raw.get("model_kwargs", {}))
