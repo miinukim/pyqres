@@ -41,11 +41,18 @@ The main public protocols are re-exported from both `pyqres` and `pyqres.core`:
 For convenience, common APIs are re-exported from the top-level `pyqres`
 namespace. The implementation still lives in categorized packages:
 
+- `qres.qresreservoir.from_dict(...)` -> dictionary-first reservoir factory
 - `qres.reservoir(...)` -> `pyqres.core.fluent`
 - `qres.compile_reservoir(...)` -> `pyqres.core.builders`
 - `qres.ReservoirSpec` -> `pyqres.core.specs`
 - `qres.data.*`, `qres.readout.*`, and `qres.Experiment` ->
   `pyqres.experiments`
+
+The package also provides a short import alias for examples:
+
+```python
+from qres import qresreservoir
+```
 
 The central Hamiltonian convention remains:
 
@@ -83,24 +90,34 @@ python -m pip install -e ../pyqres-tasks
 
 ## Reservoir-First Workflow
 
-The primary interface is a small Python workflow: build a reservoir, pass data
-through it, and optionally fit a readout.
+The primary interface is a small Python workflow: describe a reservoir with a
+plain dictionary, pass data through it, and optionally fit a readout. Dictionary
+construction is the recommended user-facing API because it avoids long chains
+of builder calls while still using the same core compiler underneath.
 
 ```python
 import numpy as np
 import pyqres as qres
+from qres import qresreservoir
 
 series = np.sin(np.linspace(0.0, 12.0, 1000))
 
-reservoir = (
-    qres.reservoir("ising")
-    .memory_qubits(5)
-    .readout_qubits(2)
-    .input("Z", site=0, strength=1.2)
-    .evolution(tau=0.6)
-    .observables("rich", count=8)
-    .backend("exact")
-)
+reservoir = qresreservoir.from_dict({
+    "preset": "Ising",
+    "memory_qubits": 5,
+    "readout_qubits": 2,
+    "input": {"axis": "Z", "site": 0, "strength": 1.2},
+    "evolution": {
+        "tau": 0.6,
+        "gx_memory": 0.9,
+        "jzz_memory": 1.0,
+        "gx_readout": 0.8,
+        "kz_memory_readout": 0.6,
+    },
+    "observables": {"preset": "rich", "count": 8},
+    "readout": {"include_bias": True, "init_state": "zero"},
+    "backend": "exact",
+})
 
 dataset = qres.data.timeseries(series, target_horizon=1).split(
     washout=100,
@@ -130,19 +147,85 @@ dataset = qres.data.arrays(inputs, targets).split(
     test=40,
 )
 
-reservoir = (
-    qres.reservoir("ising")
-    .memory_qubits(2)
-    .readout_qubits(1)
-    .ancilla_probabilities()
-    .backend("exact")
-)
+reservoir = qres.qresreservoir.from_dict({
+    "preset": "Ising",
+    "memory_qubits": 2,
+    "readout_qubits": 1,
+    "readout": {"mode": "ancilla_probabilities", "include_bias": True},
+    "backend": "exact",
+})
 
 result = qres.Experiment(reservoir, dataset, readout=qres.readout.Ridge()).run()
 ```
 
 The same `Dataset` and `Experiment` objects work with custom user tasks,
 `pyqres-tasks` presets, or data loaded from files.
+
+## Reservoir Dictionaries
+
+`qresreservoir.from_dict(...)` accepts a compact reservoir description and
+returns a compiled reservoir. Common fields are:
+
+- `preset`: built-in preset name such as `"Ising"`, `"RandomPauli"`, or `"SYK"`.
+- `memory_qubits` / `readout_qubits`: recurrent and readout register sizes.
+- `input`: scalar input encoding, for example `{"axis": "Z", "site": 0,
+  "strength": 1.2}`.
+- `evolution`: dynamics/model parameters such as `tau`, couplings, or preset
+  model options.
+- `observables`: memory-observable readout, for example `{"preset": "rich",
+  "count": 8}`.
+- `readout`: feature readout options such as `mode`, `include_bias`,
+  `init_state`, `shots`, and `shot_noise`.
+- `backend`: compiler target, for example `"exact"`, `"memory_observable"`,
+  `"hardware_trajectory"`, or `"qiskit"`.
+
+The factory also supports explicit Hamiltonian reservoirs:
+
+```python
+reservoir = qres.qresreservoir.from_dict({
+    "memory_qubits": 1,
+    "readout_qubits": 1,
+    "hamiltonian": {
+        "h0_terms": [(1.0, ((0, "X"),))],
+        "h1_terms": [(0.5, ((1, "Z"),))],
+    },
+    "readout": {"mode": "ancilla_probabilities", "include_bias": False},
+    "backend": "exact",
+})
+```
+
+And user-supplied Qiskit circuits:
+
+```python
+reservoir = qres.qresreservoir.from_dict({
+    "memory_qubits": 1,
+    "readout_qubits": 1,
+    "circuit": quantum_circuit,
+    "backend": "qiskit",
+})
+```
+
+If you need to inspect or modify the builder before compilation, use:
+
+```python
+builder = qres.qresreservoir.builder_from_dict({...})
+reservoir = builder.build()
+```
+
+The fluent chain remains available for interactive work and mirrors the same
+settings:
+
+```python
+reservoir = (
+    qres.reservoir("ising")
+    .memory_qubits(5)
+    .readout_qubits(2)
+    .input("Z", site=0, strength=1.2)
+    .evolution(tau=0.6)
+    .observables("rich", count=8)
+    .backend("exact")
+)
+```
 
 ## Config-Driven Runs
 
@@ -200,8 +283,8 @@ result = run_experiment_from_config({
 
 ## Reservoir Specs
 
-The fluent API builds `ReservoirSpec` objects internally. For lower-level
-workflows, specs can still be created and compiled directly:
+Both the dictionary API and fluent API build `ReservoirSpec` objects internally.
+For lower-level workflows, specs can still be created and compiled directly:
 
 ```python
 spec = qres.ReservoirSpec(family="ising", n_system=3, n_ancilla=1, tau=0.8)
