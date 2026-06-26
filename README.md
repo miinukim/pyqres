@@ -100,12 +100,12 @@ import numpy as np
 import pyqres as qres
 from qres import qresreservoir
 
-series = np.sin(np.linspace(0.0, 12.0, 1000))
+series = np.sin(np.linspace(0.0, 12.0, 200))
 
 reservoir = qresreservoir.from_dict({
     "preset": "Ising",
-    "memory_qubits": 5,
-    "readout_qubits": 2,
+    "memory_qubits": 3,
+    "readout_qubits": 1,
     "input": {"axis": "Z", "site": 0, "strength": 1.2},
     "evolution": {
         "tau": 0.6,
@@ -114,15 +114,15 @@ reservoir = qresreservoir.from_dict({
         "gx_readout": 0.8,
         "kz_memory_readout": 0.6,
     },
-    "observables": {"preset": "rich", "count": 8},
+    "observables": {"preset": "rich", "count": 4},
     "readout": {"include_bias": True, "init_state": "zero"},
     "backend": "exact",
 })
 
 dataset = qres.data.timeseries(series, target_horizon=1).split(
-    washout=100,
-    train=600,
-    test=250,
+    washout=20,
+    train=120,
+    test=50,
 )
 
 result = qres.Experiment(
@@ -197,6 +197,12 @@ reservoir = qres.qresreservoir.from_dict({
 And user-supplied Qiskit circuits:
 
 ```python
+from qiskit import QuantumCircuit
+
+quantum_circuit = QuantumCircuit(2)
+quantum_circuit.h(0)
+quantum_circuit.cx(0, 1)
+
 reservoir = qres.qresreservoir.from_dict({
     "memory_qubits": 1,
     "readout_qubits": 1,
@@ -208,7 +214,12 @@ reservoir = qres.qresreservoir.from_dict({
 If you need to inspect or modify the builder before compilation, use:
 
 ```python
-builder = qres.qresreservoir.builder_from_dict({...})
+builder = qres.qresreservoir.builder_from_dict({
+    "preset": "Ising",
+    "memory_qubits": 1,
+    "readout_qubits": 1,
+    "backend": "exact",
+})
 reservoir = builder.build()
 ```
 
@@ -234,12 +245,13 @@ task-specific code:
 
 ```yaml
 dataset:
-  source: npz
-  path: dataset.npz
+  source: timeseries
+  series: [0.0, 0.10, 0.21, 0.31, 0.40, 0.48, 0.55, 0.61, 0.66, 0.70, 0.73, 0.75, 0.76]
+  target_horizon: 1
   split:
-    washout: 20
-    train: 120
-    test: 40
+    washout: 2
+    train: 6
+    test: 4
 
 reservoir:
   family: ising
@@ -272,7 +284,12 @@ The same configuration can be submitted directly as a Python dictionary:
 from pyqres.experiments import run_experiment_from_config
 
 result = run_experiment_from_config({
-    "dataset": {"source": "npz", "path": "dataset.npz"},
+    "dataset": {
+        "source": "timeseries",
+        "series": [0.0, 0.10, 0.21, 0.31, 0.40, 0.48, 0.55, 0.61, 0.66, 0.70, 0.73, 0.75, 0.76],
+        "target_horizon": 1,
+        "split": {"washout": 2, "train": 6, "test": 4},
+    },
     "reservoir": {"family": "ising", "n_system": 2, "n_ancilla": 1, "tau": 0.6},
     "backend": "exact",
     "readout": {"kind": "ridge", "l2": 1.0e-6},

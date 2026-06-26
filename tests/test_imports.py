@@ -78,6 +78,7 @@ def test_public_imports():
     from pyqres.dim import IsingReservoirModel, IsingReservoirParameters, QRCLibExactReservoirModel
     from pyqres.baselines import ESNConfig
     from pyqres import Dataset, Experiment, ReservoirSpec, Ridge
+    from pyqres.experiments.cli import main, run_experiment
 
     assert ExactQRCModelConfig is not None
     assert QRCReservoir is not None
@@ -91,6 +92,8 @@ def test_public_imports():
     assert Experiment is not None
     assert ReservoirSpec is not None
     assert Ridge is not None
+    assert run_experiment is not None
+    assert main is not None
 
 
 def test_simulation_and_dim_smoke():
