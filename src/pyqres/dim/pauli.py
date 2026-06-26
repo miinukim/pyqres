@@ -12,7 +12,7 @@ operators is simpler than introducing sparse or symbolic machinery.
 
 from functools import lru_cache
 from itertools import product
-from typing import Iterable, List, Sequence, Tuple
+from typing import Tuple
 
 import numpy as np
 

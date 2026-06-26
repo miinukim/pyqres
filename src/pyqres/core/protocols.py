@@ -26,6 +26,8 @@ PauliTermLike: TypeAlias = Any
 HamiltonianLike: TypeAlias = Any
 CircuitLike: TypeAlias = Any
 BackendLike: TypeAlias = Any
+DynamicsLike: TypeAlias = Mapping[str, Any] | tuple[Any, Any] | CircuitLike | Any
+QiskitArtifactMap: TypeAlias = Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,44 @@ class CircuitReservoirProtocol(StreamingReservoirProtocol, Protocol):
 
 
 @runtime_checkable
+class QuantumCircuitProtocol(Protocol):
+    """Minimal raw-circuit artifact accepted by Qiskit circuit dynamics."""
+
+    num_qubits: int
+
+    def to_instruction(self) -> Any:
+        ...
+
+
+@runtime_checkable
+class SparsePauliOpProtocol(Protocol):
+    """Minimal Qiskit-native Hamiltonian artifact for PauliEvolutionGate."""
+
+    num_qubits: int
+
+
+@runtime_checkable
+class QiskitReservoirConfigProtocol(Protocol):
+    """Configuration object consumed by the Qiskit reservoir implementation."""
+
+    n_system: int
+    n_ancilla: int
+    reservoir_type: str
+    reservoir_circuit: QuantumCircuitProtocol | None
+    reservoir_circuit_targets: tuple[int, ...] | None
+    H0_hamiltonian: SparsePauliOpProtocol | None
+    H1_hamiltonian: SparsePauliOpProtocol | None
+    tau: float
+    input_scale: float
+    seed: int
+    include_bias: bool
+    shots: int
+
+    def total_qubits(self) -> int:
+        ...
+
+
+@runtime_checkable
 class DimensionModelProtocol(Protocol):
     """Dimension-analysis model contract used by memory-observable reservoirs."""
 
@@ -179,6 +219,33 @@ class HamiltonianSpecProtocol(Protocol):
 
 
 @runtime_checkable
+class InputEncodingSpecProtocol(Protocol):
+    """Serializable description of how inputs are encoded into reservoir steps."""
+
+    mode: str
+    operator: str | None
+    targets: Sequence[int]
+    scale: float
+    bias: float
+    parameters: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        ...
+
+
+@runtime_checkable
+class DynamicsSpecProtocol(Protocol):
+    """Serializable description of reservoir dynamics independent of presets."""
+
+    kind: str
+    name: str | None
+    parameters: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        ...
+
+
+@runtime_checkable
 class ReadoutSpecProtocol(Protocol):
     """Serializable reservoir feature-readout configuration."""
 
@@ -217,6 +284,8 @@ class ReservoirSpecProtocol(SerializableSpecProtocol, Protocol):
     tau: float
     input_scale: float
     seed: int
+    encoding: InputEncodingSpecProtocol
+    dynamics: DynamicsSpecProtocol
     readout: ReadoutSpecProtocol
     model_kwargs: Mapping[str, Any]
     hamiltonian_kwargs: Mapping[str, Any]
@@ -237,71 +306,10 @@ class ReservoirSpecProtocol(SerializableSpecProtocol, Protocol):
 
 @runtime_checkable
 class ReservoirBuilderProtocol(Protocol):
-    """Chainable builder used by qres.reservoir(...)."""
+    """Internal builder contract returned by dictionary reservoir construction."""
 
     @property
     def spec(self) -> ReservoirSpecProtocol:
-        ...
-
-    def memory_qubits(self, n_qubits: int) -> "ReservoirBuilderProtocol":
-        ...
-
-    def readout_qubits(self, n_qubits: int) -> "ReservoirBuilderProtocol":
-        ...
-
-    def seed(self, value: int) -> "ReservoirBuilderProtocol":
-        ...
-
-    def preset(self, name: str, **kwargs: Any) -> "ReservoirBuilderProtocol":
-        ...
-
-    def input(
-        self,
-        axis: str = "Z",
-        *,
-        site: int = 0,
-        sites: Sequence[int] | None = None,
-        strength: float = 1.0,
-        on_memory: bool = True,
-        scale: float | None = None,
-        normalization: str = "none",
-    ) -> "ReservoirBuilderProtocol":
-        ...
-
-    def evolution(self, *, tau: float | None = None, **kwargs: Any) -> "ReservoirBuilderProtocol":
-        ...
-
-    def observables(
-        self,
-        preset: ObservableSpec = "z",
-        *,
-        count: int | None = None,
-        custom: Sequence[str] | None = None,
-        include_bias: bool = True,
-        init_state: str = "zero",
-    ) -> "ReservoirBuilderProtocol":
-        ...
-
-    def ancilla_probabilities(
-        self,
-        *,
-        include_bias: bool = True,
-        init_state: str = "maximally_mixed",
-        shot_noise: bool = False,
-        shots: int = 4096,
-    ) -> "ReservoirBuilderProtocol":
-        ...
-
-    def model(self, **kwargs: Any) -> "ReservoirBuilderProtocol":
-        ...
-
-    def hamiltonian(self, *args: Any, **kwargs: Any) -> "ReservoirBuilderProtocol":
-        ...
-
-    def circuit(self, circuit: CircuitLike, **kwargs: Any) -> "ReservoirBuilderProtocol":
-        ...
-
-    def use(self, reservoir: Any) -> "ReservoirBuilderProtocol":
         ...
 
     def backend(self, name: str = "exact") -> Any:
@@ -320,6 +328,14 @@ class ReservoirCompilerProtocol(Protocol):
 
 
 @runtime_checkable
+class TransformFunctionProtocol(Protocol):
+    """Function contract for running any supported reservoir object on inputs."""
+
+    def __call__(self, reservoir: Any, inputs: InputSequence) -> FeatureMatrix:
+        ...
+
+
+@runtime_checkable
 class ReservoirFactoryProtocol(Protocol):
     """Dictionary-first reservoir factory contract."""
 
@@ -329,6 +345,34 @@ class ReservoirFactoryProtocol(Protocol):
 
     @classmethod
     def from_dict(cls, config: Mapping[str, Any]) -> Any:
+        ...
+
+
+@runtime_checkable
+class PresetRegistryProtocol(Protocol):
+    """Registry/adapter contract for named reservoir presets."""
+
+    def names(self) -> list[str]:
+        ...
+
+    def get(self, name: str, **kwargs: object) -> ReservoirSpecProtocol:
+        ...
+
+    def build_dimension_model(self, spec: ReservoirSpecProtocol) -> DimensionModelProtocol:
+        ...
+
+    def build_hamiltonian_params(self, spec: ReservoirSpecProtocol) -> Mapping[str, Any]:
+        ...
+
+    def build_qiskit_artifacts(self, spec: ReservoirSpecProtocol) -> QiskitArtifactMap:
+        ...
+
+
+@runtime_checkable
+class DynamicsInferenceProtocol(Protocol):
+    """Callable contract for resolving user dynamics input into builder state."""
+
+    def __call__(self, value: DynamicsLike, *, default_preset: str) -> tuple[DynamicsSpecProtocol | None, Mapping[str, Any]]:
         ...
 
 
@@ -477,7 +521,7 @@ class TaskDatasetFactoryProtocol(Protocol):
 
 @runtime_checkable
 class TaskRunnerProtocol(Protocol):
-    """Legacy task-runner contract kept for task packages that stream directly."""
+    """Task-runner contract for external task packages that stream directly."""
 
     res: StreamingReservoirProtocol
     cfg: Any

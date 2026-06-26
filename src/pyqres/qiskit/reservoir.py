@@ -3,20 +3,18 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
-from pyqres.core import HamiltonianSpec, ReservoirParams, dense_hamiltonian_matrix
 
 from .config import QRCConfig
 
 try:
     from qiskit import QuantumCircuit, transpile
     from qiskit.circuit.library import PauliEvolutionGate
-    from qiskit.quantum_info import Operator, SparsePauliOp
+    from qiskit.quantum_info import SparsePauliOp
     from qiskit.synthesis import LieTrotter, SuzukiTrotter
 except Exception:  # pragma: no cover
     QuantumCircuit = None  # type: ignore
     transpile = None  # type: ignore
     PauliEvolutionGate = None  # type: ignore
-    Operator = None  # type: ignore
     SparsePauliOp = None  # type: ignore
     LieTrotter = None  # type: ignore
     SuzukiTrotter = None  # type: ignore
@@ -45,40 +43,31 @@ class QRCReservoir:
         self._init_backend_parameters()
 
     def _init_backend_parameters(self) -> None:
-        """Initialize reusable Hamiltonian specs and random input signs."""
+        """Initialize reusable Qiskit-native artifacts and random input signs."""
 
         cfg = self.cfg
         n = cfg.total_qubits()
         rs = np.random.RandomState(cfg.seed)
         self.input_sign = rs.choice([-1.0, 1.0], size=n)
-        if cfg.H0_hamiltonian is None and cfg.H1_hamiltonian is None:
-            generated = ReservoirParams.ising_type(
-                n_system=cfg.n_system,
-                n_ancilla=cfg.n_ancilla,
-                tau=cfg.tau,
-                seed=cfg.seed,
-            ).generate()
-            self.H0_hamiltonian = generated["H0_hamiltonian"]
-            self.H1_hamiltonian = generated["H1_hamiltonian"]
-        else:
-            self.H0_hamiltonian = cfg.H0_hamiltonian
-            self.H1_hamiltonian = cfg.H1_hamiltonian
+        if cfg.reservoir_type == "pauli_evolution":
+            self.H0_hamiltonian = self._require_sparse_pauli_op("H0_hamiltonian", cfg.H0_hamiltonian)
+            self.H1_hamiltonian = self._require_sparse_pauli_op("H1_hamiltonian", cfg.H1_hamiltonian)
 
-    def _to_sparse_pauli_op(self, hamiltonian_like: object | None) -> "SparsePauliOp":
-        """Convert backend-neutral Hamiltonian input to Qiskit's sparse Pauli form."""
+    def _require_sparse_pauli_op(self, name: str, value: object | None) -> "SparsePauliOp":
+        """Validate that lower layers received Qiskit-native Hamiltonian artifacts."""
 
-        n = self.cfg.total_qubits()
-        if SparsePauliOp is None or Operator is None:
+        if SparsePauliOp is None:
             raise ImportError("qiskit is required for pauli_evolution reservoirs.")
-        if hamiltonian_like is None:
-            return SparsePauliOp.from_list([("I" * n, 0.0)])
-        if isinstance(hamiltonian_like, HamiltonianSpec):
-            return hamiltonian_like.to_sparse_pauli_op()
-        if isinstance(hamiltonian_like, SparsePauliOp):
-            return hamiltonian_like
-        if hasattr(hamiltonian_like, "to_sparse_pauli_op") and callable(hamiltonian_like.to_sparse_pauli_op):
-            return hamiltonian_like.to_sparse_pauli_op()
-        return SparsePauliOp.from_operator(Operator(dense_hamiltonian_matrix(hamiltonian_like)))
+        if value is None:
+            raise ValueError(f"{name} is required when reservoir_type='pauli_evolution'.")
+        if not isinstance(value, SparsePauliOp):
+            raise TypeError(
+                f"{name} must be a qiskit.quantum_info.SparsePauliOp. "
+                "Use a preset adapter or explicit qiskit-native Hamiltonian artifacts before constructing QRCReservoir."
+            )
+        if value.num_qubits != self.cfg.total_qubits():
+            raise ValueError(f"{name} acts on {value.num_qubits} qubits, expected {self.cfg.total_qubits()}.")
+        return value
 
     def _evolution_synthesis(self) -> object | None:
         """Choose a Qiskit product-formula synthesis for Pauli evolution gates."""
@@ -106,9 +95,7 @@ class QRCReservoir:
 
         if PauliEvolutionGate is None:
             raise ImportError("qiskit is required for pauli_evolution reservoirs.")
-        h0 = self._to_sparse_pauli_op(self.H0_hamiltonian)
-        h1 = self._to_sparse_pauli_op(self.H1_hamiltonian)
-        hamiltonian = h0 + float(self.cfg.input_scale * uval) * h1
+        hamiltonian = self.H0_hamiltonian + float(self.cfg.input_scale * uval) * self.H1_hamiltonian
         qc.append(
             PauliEvolutionGate(hamiltonian, time=float(self.cfg.tau), synthesis=self._evolution_synthesis()),
             list(range(self.cfg.total_qubits())),
@@ -157,9 +144,9 @@ class QRCReservoir:
         circuit = cfg.reservoir_circuit
         if circuit is None:
             raise ValueError("reservoir_circuit must be provided when reservoir_type='custom_circuit'.")
+        if QuantumCircuit is not None and not isinstance(circuit, QuantumCircuit):
+            raise TypeError("reservoir_circuit must be a qiskit.QuantumCircuit when reservoir_type='custom_circuit'.")
         n_circuit = getattr(circuit, "num_qubits", None)
-        if n_circuit is None:
-            raise TypeError("reservoir_circuit must expose num_qubits.")
         targets = cfg.reservoir_circuit_targets
         if targets is None:
             if int(n_circuit) != cfg.total_qubits():
@@ -176,7 +163,7 @@ class QRCReservoir:
                 )
             if len(set(targets)) != len(targets) or any(t < 0 or t >= cfg.total_qubits() for t in targets):
                 raise ValueError(f"Invalid reservoir_circuit_targets {targets}.")
-        instruction = circuit.to_instruction() if hasattr(circuit, "to_instruction") else circuit
+        instruction = circuit.to_instruction()
         qc.append(instruction, list(targets))
 
     def _apply_purification_entangle(self, qc: "QuantumCircuit") -> None:

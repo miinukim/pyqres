@@ -2,7 +2,7 @@
 
 from .control import MeasurementControlConfig
 from .builders import build_dimension_model, build_hamiltonian_params, compile_reservoir, transform
-from .fluent import ReservoirBuilder, qresreservoir, reservoir
+from .fluent import qresreservoir
 from .protocols import (
     BackendLike,
     BatchReservoirProtocol,
@@ -13,6 +13,9 @@ from .protocols import (
     DatasetSplitProtocol,
     DatasetProtocol,
     DimensionModelProtocol,
+    DynamicsInferenceProtocol,
+    DynamicsLike,
+    DynamicsSpecProtocol,
     ExperimentResultProtocol,
     ExperimentProtocol,
     FeatureMatrix,
@@ -20,11 +23,16 @@ from .protocols import (
     HamiltonianSpecProtocol,
     IndexSequence,
     InputSequence,
+    InputEncodingSpecProtocol,
     MetricCallable,
     MemoryObservableReservoirProtocol,
     ObservableSpec,
     PauliTermLike,
+    PresetRegistryProtocol,
     QRCReservoirProtocol,
+    QiskitArtifactMap,
+    QiskitReservoirConfigProtocol,
+    QuantumCircuitProtocol,
     ReadoutSpecProtocol,
     ReadoutProtocol,
     ReservoirBuilderProtocol,
@@ -36,6 +44,7 @@ from .protocols import (
     SerializableSpecProtocol,
     StatefulReservoirProtocol,
     StepReservoirProtocol,
+    SparsePauliOpProtocol,
     StreamingReservoirProtocol,
     SupervisedDataBuilderProtocol,
     SweepProtocol,
@@ -44,6 +53,7 @@ from .protocols import (
     TaskDatasetFactoryProtocol,
     TaskRunnerProtocol,
     TimeSeriesDataBuilderProtocol,
+    TransformFunctionProtocol,
     TransformReservoirProtocol,
 )
 from .reservoir_params import (
@@ -57,7 +67,7 @@ from .reservoir_params import (
     pauli_terms_to_labels,
     pauli_terms_to_sparse_pauli_op,
 )
-from .specs import ReadoutSpec, ReservoirSpec
+from .specs import DynamicsSpec, InputEncodingSpec, ReadoutSpec, ReservoirSpec
 
 __all__ = [
     "BackendLike",
@@ -69,6 +79,10 @@ __all__ = [
     "DatasetSplitProtocol",
     "DatasetProtocol",
     "DimensionModelProtocol",
+    "DynamicsInferenceProtocol",
+    "DynamicsLike",
+    "DynamicsSpec",
+    "DynamicsSpecProtocol",
     "ExperimentResultProtocol",
     "ExperimentProtocol",
     "FeatureMatrix",
@@ -77,13 +91,19 @@ __all__ = [
     "HamiltonianSpecProtocol",
     "IndexSequence",
     "InputSequence",
+    "InputEncodingSpec",
+    "InputEncodingSpecProtocol",
     "MeasurementControlConfig",
     "MemoryObservableReservoirProtocol",
     "MetricCallable",
     "ObservableSpec",
     "PauliTerm",
     "PauliTermLike",
+    "PresetRegistryProtocol",
     "QRCReservoirProtocol",
+    "QiskitArtifactMap",
+    "QiskitReservoirConfigProtocol",
+    "QuantumCircuitProtocol",
     "ReadoutSpec",
     "ReadoutSpecProtocol",
     "ReadoutProtocol",
@@ -95,11 +115,11 @@ __all__ = [
     "ReservoirSpecProtocol",
     "ReservoirSpec",
     "ReservoirStepResult",
-    "ReservoirBuilder",
     "qresreservoir",
     "SerializableSpecProtocol",
     "StatefulReservoirProtocol",
     "StepReservoirProtocol",
+    "SparsePauliOpProtocol",
     "StreamingReservoirProtocol",
     "SupervisedDataBuilderProtocol",
     "SweepProtocol",
@@ -108,6 +128,7 @@ __all__ = [
     "TaskDatasetFactoryProtocol",
     "TaskRunnerProtocol",
     "TimeSeriesDataBuilderProtocol",
+    "TransformFunctionProtocol",
     "TransformReservoirProtocol",
     "build_dimension_model",
     "build_hamiltonian_params",
@@ -118,6 +139,5 @@ __all__ = [
     "pauli_terms_matrix",
     "pauli_terms_to_labels",
     "pauli_terms_to_sparse_pauli_op",
-    "reservoir",
     "transform",
 ]

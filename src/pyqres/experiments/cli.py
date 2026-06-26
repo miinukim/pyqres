@@ -66,11 +66,5 @@ def main() -> None:
             print(f"{split}_{name}: {value:.6g}")
 
 
-def run_experiment() -> None:
-    """Backward-compatible console entry point for older editable installs."""
-
-    main()
-
-
 if __name__ == "__main__":
     main()

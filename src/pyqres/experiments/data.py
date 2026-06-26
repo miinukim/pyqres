@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Lightweight data helpers for fluent experiments."""
+"""Lightweight data helpers for generic experiments."""
 
 from pathlib import Path
 from typing import Any, Mapping, Sequence

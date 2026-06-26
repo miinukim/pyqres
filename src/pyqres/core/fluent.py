@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-"""Fluent reservoir construction API."""
+"""Dictionary-first reservoir construction API."""
 
-from dataclasses import replace
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from pyqres.core.builders import compile_reservoir
 from pyqres.core.protocols import ReservoirBuilderProtocol
-from pyqres.core.specs import ReservoirSpec
+from pyqres.core.specs import DynamicsSpec, InputEncodingSpec, ReadoutSpec, ReservoirSpec
 
 
+@dataclass
 class ReservoirBuilder(ReservoirBuilderProtocol):
-    """Chainable builder for the common interactive pyqres workflow."""
+    """Minimal inspectable builder returned by qresreservoir.builder_from_dict."""
 
-    def __init__(self, family: str = "ising", spec: ReservoirSpec | None = None):
-        self._spec = spec if spec is not None else ReservoirSpec(family=family, preset=family, source_kind="preset")
-        self._backend = "exact"
+    _spec: ReservoirSpec
+    _backend: str = "exact"
 
     @property
     def spec(self) -> ReservoirSpec:
@@ -23,234 +23,16 @@ class ReservoirBuilder(ReservoirBuilderProtocol):
 
         return self._spec
 
-    def memory_qubits(self, n_qubits: int) -> "ReservoirBuilder":
-        """Set the number of recurrent memory/system qubits."""
-
-        self._spec = replace(self._spec, n_memory=int(n_qubits), n_system=int(n_qubits))
-        return self
-
-    def readout_qubits(self, n_qubits: int) -> "ReservoirBuilder":
-        """Set the number of readout/ancilla qubits."""
-
-        self._spec = replace(self._spec, n_readout=int(n_qubits), n_ancilla=int(n_qubits))
-        return self
-
-    def seed(self, value: int) -> "ReservoirBuilder":
-        """Set the reservoir random seed."""
-
-        self._spec = replace(self._spec, seed=int(value))
-        return self
-
-    def preset(self, name: str, **kwargs: Any) -> "ReservoirBuilder":
-        """Select a built-in reservoir preset and optionally set its parameters."""
-
-        spec_updates: dict[str, Any] = {
-            "family": str(name),
-            "preset": str(name),
-            "source_kind": "preset",
-            "runtime": {},
-        }
-        for source, target in {
-            "n_memory": "n_memory",
-            "n_readout": "n_readout",
-            "n_system": "n_system",
-            "n_ancilla": "n_ancilla",
-            "tau": "tau",
-            "input_scale": "input_scale",
-            "seed": "seed",
-        }.items():
-            if source in kwargs:
-                spec_updates[target] = kwargs.pop(source)
-        model_kwargs = dict(self._spec.model_kwargs)
-        hamiltonian_kwargs = dict(self._spec.hamiltonian_kwargs)
-        model_kwargs.update(kwargs)
-        hamiltonian_kwargs.update(kwargs)
-        self._spec = replace(
-            self._spec,
-            **spec_updates,
-            model_kwargs=model_kwargs,
-            hamiltonian_kwargs=hamiltonian_kwargs,
-        )
-        return self
-
-    def input(
-        self,
-        axis: str = "Z",
-        *,
-        site: int = 0,
-        sites: Sequence[int] | None = None,
-        strength: float = 1.0,
-        on_memory: bool = True,
-        scale: float | None = None,
-        normalization: str = "none",
-    ) -> "ReservoirBuilder":
-        """Configure scalar input encoding for supported Ising reservoirs."""
-
-        axis_key = str(axis).upper()
-        if axis_key not in {"X", "Y", "Z"}:
-            raise ValueError("input axis must be one of X, Y, or Z")
-
-        model_kwargs = dict(self._spec.model_kwargs)
-        model_kwargs.update(
-            {
-                "input_axis": axis_key,
-                "input_strength": float(strength),
-                "input_on_memory": bool(on_memory),
-                "input_site": int(site),
-                "input_strength_normalization": str(normalization),
-            }
-        )
-        if sites is not None:
-            model_kwargs["input_sites"] = tuple(int(item) for item in sites)
-
-        hamiltonian_kwargs = dict(self._spec.hamiltonian_kwargs)
-        if axis_key == "Z":
-            hamiltonian_kwargs["input_z_field_base"] = float(strength)
-            hamiltonian_kwargs.setdefault("input_z_field_std", 0.0)
-            hamiltonian_kwargs["input_z_field_scale"] = 1.0 if scale is None else float(scale)
-
-        self._spec = replace(
-            self._spec,
-            input_scale=1.0 if scale is None else float(scale),
-            model_kwargs=model_kwargs,
-            hamiltonian_kwargs=hamiltonian_kwargs,
-        )
-        return self
-
-    def evolution(self, *, tau: float | None = None, **kwargs: Any) -> "ReservoirBuilder":
-        """Configure reservoir dynamics parameters."""
-
-        updates: dict[str, Any] = {}
-        model_kwargs = dict(self._spec.model_kwargs)
-        hamiltonian_kwargs = dict(self._spec.hamiltonian_kwargs)
-        if tau is not None:
-            updates["tau"] = float(tau)
-        for key, value in kwargs.items():
-            model_kwargs[key] = value
-            hamiltonian_kwargs[key] = value
-        self._spec = replace(self._spec, **updates, model_kwargs=model_kwargs, hamiltonian_kwargs=hamiltonian_kwargs)
-        return self
-
-    def observables(
-        self,
-        preset: str | Sequence[str] = "z",
-        *,
-        count: int | None = None,
-        custom: Sequence[str] | None = None,
-        include_bias: bool = True,
-        init_state: str = "zero",
-    ) -> "ReservoirBuilder":
-        """Use memory-observable features for reservoir readout."""
-
-        readout = replace(
-            self._spec.readout,
-            mode="memory_observables",
-            observables=preset,
-            count=count,
-            custom=tuple(custom or ()),
-            include_bias=bool(include_bias),
-            init_state=str(init_state),
-        )
-        self._spec = replace(self._spec, readout=readout)
-        return self
-
-    def ancilla_probabilities(
-        self,
-        *,
-        include_bias: bool = True,
-        init_state: str = "maximally_mixed",
-        shot_noise: bool = False,
-        shots: int = 4096,
-    ) -> "ReservoirBuilder":
-        """Use ancilla outcome probabilities as reservoir features."""
-
-        readout = replace(
-            self._spec.readout,
-            mode="ancilla_probs",
-            include_bias=bool(include_bias),
-            init_state=str(init_state),
-            use_shot_noise=bool(shot_noise),
-            shots=int(shots),
-        )
-        self._spec = replace(self._spec, readout=readout)
-        return self
-
-    def model(self, **kwargs: Any) -> "ReservoirBuilder":
-        """Set backend model parameters directly."""
-
-        model_kwargs = dict(self._spec.model_kwargs)
-        model_kwargs.update(kwargs)
-        self._spec = replace(self._spec, model_kwargs=model_kwargs)
-        return self
-
-    def hamiltonian(self, *args: Any, **kwargs: Any) -> "ReservoirBuilder":
-        """Use an explicit Hamiltonian as the reservoir dynamics.
-
-        Examples:
-        - hamiltonian(h0=H0, h1=H1)
-        - hamiltonian(h0_terms=[...], h1_terms=[...])
-        - hamiltonian(kind="pauli_terms", h0_terms=[...])
-        """
-
-        if args:
-            if len(args) > 2:
-                raise TypeError("hamiltonian accepts at most positional h0 and h1 arguments")
-            kwargs.setdefault("h0", args[0])
-            if len(args) == 2:
-                kwargs.setdefault("h1", args[1])
-        hamiltonian_kwargs = dict(self._spec.hamiltonian_kwargs)
-        hamiltonian_kwargs.update(kwargs)
-        self._spec = replace(
-            self._spec,
-            source_kind="hamiltonian",
-            hamiltonian_kwargs=hamiltonian_kwargs,
-            runtime={},
-        )
-        return self
-
-    def circuit(self, circuit: Any, **kwargs: Any) -> "ReservoirBuilder":
-        """Use a user-supplied quantum circuit as the repeated reservoir block."""
-
-        circuit_kwargs = dict(self._spec.circuit_kwargs)
-        circuit_kwargs.update(kwargs)
-        self._backend = "qiskit"
-        self._spec = replace(
-            self._spec,
-            source_kind="circuit",
-            circuit_kwargs=circuit_kwargs,
-            runtime={"circuit": circuit},
-        )
-        return self
-
-    def use(self, reservoir: Any) -> "ReservoirBuilder":
-        """Use an already constructed reservoir object directly."""
-
-        self._spec = replace(
-            self._spec,
-            source_kind="object",
-            runtime={"reservoir": reservoir},
-        )
-        return self
-
     def backend(self, name: str = "exact") -> Any:
         """Compile and return an executable reservoir."""
 
         self._backend = str(name)
-        backend = self._backend
-        if backend.lower() in {"exact", "dense"} and self._spec.readout.mode == "memory_observables":
-            backend = "memory_observable"
-        return compile_reservoir(self._spec, backend=backend)
+        return compile_reservoir(self._spec, backend=self._backend)
 
     def build(self, backend: str | None = None) -> Any:
         """Compile and return an executable reservoir."""
 
         return self.backend(self._backend if backend is None else backend)
-
-
-def reservoir(family: str = "ising") -> ReservoirBuilder:
-    """Start a chainable reservoir construction."""
-
-    return ReservoirBuilder(family=family)
 
 
 def _pop_any(raw: dict[str, Any], names: Sequence[str], default: Any = None) -> Any:
@@ -268,41 +50,79 @@ def _as_mapping(value: Any, *, name: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _apply_input_config(builder: ReservoirBuilder, input_config: Any) -> ReservoirBuilder:
-    if input_config is None:
-        return builder
-    configs = input_config if isinstance(input_config, list) else [input_config]
-    for item in configs:
-        raw = _as_mapping(item, name="input")
-        axis = raw.pop("axis", raw.pop("operator", raw.pop("pauli", "Z")))
-        builder.input(
-            str(axis),
-            site=int(raw.pop("site", 0)),
-            sites=raw.pop("sites", None),
-            strength=float(raw.pop("strength", raw.pop("scale_strength", 1.0))),
-            on_memory=bool(raw.pop("on_memory", True)),
-            scale=raw.pop("scale", None),
-            normalization=str(raw.pop("normalization", "none")),
-        )
-        if raw:
-            raise ValueError(f"Unknown input fields: {sorted(raw)}")
-    return builder
+_HAMILTONIAN_KEYS = {
+    "h0",
+    "h1",
+    "H0",
+    "H1",
+    "h0_terms",
+    "h1_terms",
+    "h0_matrix",
+    "h1_matrix",
+    "H0_matrix",
+    "H1_matrix",
+    "H0_hamiltonian",
+    "H1_hamiltonian",
+}
 
 
-def _apply_readout_config(builder: ReservoirBuilder, cfg: Mapping[str, Any]) -> ReservoirBuilder:
-    readout_cfg = _as_mapping(cfg.get("readout"), name="readout")
-    observables_cfg = cfg.get("observables")
-    if observables_cfg is not None and "observables" not in readout_cfg:
-        readout_cfg["observables"] = observables_cfg
+def _looks_like_quantum_circuit(value: Any) -> bool:
+    return hasattr(value, "num_qubits") and hasattr(value, "to_instruction")
+
+
+def _looks_like_existing_reservoir(value: Any) -> bool:
+    return any(hasattr(value, name) for name in ("transform", "run_stream", "run", "step"))
+
+
+def _infer_dynamics(value: Any, *, default_preset: str) -> tuple[DynamicsSpec | None, dict[str, Any]]:
+    """Infer a DynamicsSpec from a user-supplied object or mapping.
+
+    Runtime objects such as QuantumCircuit instances are returned in the
+    auxiliary runtime mapping instead of being embedded into the serializable
+    spec parameters.
+    """
+
+    if value is None:
+        return None, {}
+    if isinstance(value, DynamicsSpec):
+        return value, {}
+    if _looks_like_quantum_circuit(value):
+        return DynamicsSpec(kind="circuit"), {"circuit": value}
+    if _looks_like_existing_reservoir(value):
+        return DynamicsSpec(kind="object"), {"reservoir": value}
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        return DynamicsSpec(kind="hamiltonian", parameters={"h0": value[0], "h1": value[1]}), {}
+    if isinstance(value, Mapping):
+        raw = dict(value)
+        circuit = _pop_any(raw, ("circuit",), None)
+        if circuit is not None:
+            return DynamicsSpec(kind=str(raw.pop("kind", "circuit")), parameters=raw), {"circuit": circuit}
+        reservoir_obj = _pop_any(raw, ("reservoir",), None)
+        if reservoir_obj is not None:
+            return DynamicsSpec(kind=str(raw.pop("kind", "object")), parameters=raw), {"reservoir": reservoir_obj}
+        if "kind" in raw or "name" in raw or "preset" in raw or "family" in raw:
+            return DynamicsSpec.from_mapping(raw), {}
+        if _HAMILTONIAN_KEYS.intersection(raw):
+            return DynamicsSpec(kind="hamiltonian", parameters=raw), {}
+        return DynamicsSpec(kind="preset", name=default_preset, parameters=raw), {}
+    raise TypeError("dynamics must be a mapping, DynamicsSpec, QuantumCircuit-like object, existing reservoir object, or a two-item (h0, h1) Hamiltonian pair")
+
+
+def _readout_from_config(value: Any) -> ReadoutSpec:
+    readout_cfg = _as_mapping(value, name="readout")
 
     mode = str(readout_cfg.pop("mode", readout_cfg.pop("type", "memory_observables"))).lower()
     if mode in {"ancilla", "ancilla_probs", "ancilla_probabilities", "probabilities"}:
-        return builder.ancilla_probabilities(
+        readout = ReadoutSpec(
+            mode="ancilla_probs",
             include_bias=bool(readout_cfg.pop("include_bias", True)),
             init_state=str(readout_cfg.pop("init_state", "maximally_mixed")),
-            shot_noise=bool(readout_cfg.pop("shot_noise", readout_cfg.pop("use_shot_noise", False))),
+            use_shot_noise=bool(readout_cfg.pop("shot_noise", readout_cfg.pop("use_shot_noise", False))),
             shots=int(readout_cfg.pop("shots", 4096)),
         )
+        if readout_cfg:
+            raise ValueError(f"Unknown readout fields: {sorted(readout_cfg)}")
+        return readout
 
     observable_config = readout_cfg.pop("observables", "z")
     if isinstance(observable_config, Mapping):
@@ -317,19 +137,95 @@ def _apply_readout_config(builder: ReservoirBuilder, cfg: Mapping[str, Any]) -> 
         count = readout_cfg.pop("count", None)
         custom = readout_cfg.pop("custom", None)
 
-    return builder.observables(
-        preset,
+    readout = ReadoutSpec(
+        mode="memory_observables",
+        observables=preset,
         count=None if count is None else int(count),
-        custom=custom,
+        custom=tuple(custom or ()),
         include_bias=bool(readout_cfg.pop("include_bias", True)),
         init_state=str(readout_cfg.pop("init_state", "zero")),
     )
+    if readout_cfg:
+        raise ValueError(f"Unknown readout fields: {sorted(readout_cfg)}")
+    return readout
+
+
+def _promoted_spec_updates(parameters: Mapping[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    for source, target in {
+        "n_memory": "n_memory",
+        "n_readout": "n_readout",
+        "n_system": "n_system",
+        "n_ancilla": "n_ancilla",
+        "tau": "tau",
+        "input_scale": "input_scale",
+        "seed": "seed",
+    }.items():
+        if source in parameters:
+            updates[target] = parameters[source]
+    return updates
+
+
+def _spec_from_parts(
+    *,
+    preset_name: str,
+    n_memory: Any,
+    n_readout: Any,
+    seed: Any,
+    tau: Any,
+    encoding: InputEncodingSpec,
+    dynamics: DynamicsSpec | None,
+    runtime: Mapping[str, Any],
+    readout: ReadoutSpec,
+    model_kwargs: Mapping[str, Any],
+) -> ReservoirSpec:
+    dynamics = dynamics or DynamicsSpec(kind="preset", name=preset_name)
+    kind = dynamics.kind.lower()
+    parameters = dict(dynamics.parameters)
+    updates = _promoted_spec_updates(parameters)
+    if n_memory is not None:
+        updates.update({"n_memory": int(n_memory), "n_system": int(n_memory)})
+    if n_readout is not None:
+        updates.update({"n_readout": int(n_readout), "n_ancilla": int(n_readout)})
+    if seed is not None:
+        updates["seed"] = int(seed)
+    if tau is not None:
+        updates["tau"] = float(tau)
+
+    spec_kwargs: dict[str, Any] = {
+        "family": str(dynamics.name or preset_name) if kind == "preset" else preset_name,
+        "preset": str(dynamics.name or preset_name) if kind == "preset" else None,
+        "source_kind": kind,
+        "encoding": encoding,
+        "dynamics": dynamics,
+        "readout": readout,
+        "runtime": dict(runtime),
+        **updates,
+    }
+
+    if kind == "preset":
+        spec_kwargs["source_kind"] = "preset"
+        spec_kwargs["model_kwargs"] = {**parameters, **dict(model_kwargs)}
+        spec_kwargs["hamiltonian_kwargs"] = dict(parameters)
+    elif kind == "hamiltonian":
+        spec_kwargs["hamiltonian_kwargs"] = parameters
+    elif kind == "circuit":
+        if "circuit" not in runtime:
+            raise ValueError("circuit dynamics requires a QuantumCircuit-like object")
+        spec_kwargs["circuit_kwargs"] = parameters
+    elif kind == "object":
+        if "reservoir" not in runtime:
+            raise ValueError("object dynamics requires a reservoir object")
+    else:
+        spec_kwargs["model_kwargs"] = {**parameters, **dict(model_kwargs)}
+
+    return ReservoirSpec(**spec_kwargs)
 
 
 class qresreservoir:
     """Dictionary-first reservoir factory.
 
-    This is a compact facade over the fluent builder. It accepts plain Python
+    This is a compact facade over the core compiler. It accepts plain Python
     dictionaries and returns compiled reservoirs by default.
     """
 
@@ -338,58 +234,40 @@ class qresreservoir:
         """Build a ReservoirBuilder from a plain mapping without compiling it."""
 
         raw = _as_mapping(config, name="reservoir config")
-        preset_name = str(_pop_any(raw, ("preset", "family", "type", "model"), "ising")).lower()
+        raw_dynamics_input = _pop_any(raw, ("dynamics",), None)
+        dynamics, dynamics_runtime = _infer_dynamics(raw_dynamics_input, default_preset="ising")
+        raw_preset = _pop_any(raw, ("preset",), None)
+        if raw_preset is None and dynamics is not None and dynamics.kind.lower() == "preset":
+            raw_preset = dynamics.name
+        preset_name = str(raw_preset or "ising").lower()
         backend_name = str(_pop_any(raw, ("backend",), "exact"))
 
         n_memory = _pop_any(raw, ("memory_qubits", "n_memory", "n_system", "system_qubits"), None)
         n_readout = _pop_any(raw, ("readout_qubits", "n_readout", "n_ancilla", "ancilla_qubits"), None)
         seed = _pop_any(raw, ("seed",), None)
 
-        builder = reservoir(preset_name)
-        if n_memory is not None:
-            builder.memory_qubits(int(n_memory))
-        if n_readout is not None:
-            builder.readout_qubits(int(n_readout))
-        if seed is not None:
-            builder.seed(int(seed))
+        encoding_config = _pop_any(raw, ("encoding",), None)
+        encoding = InputEncodingSpec.from_mapping(encoding_config)
 
-        input_config = _pop_any(raw, ("input", "inputs"), None)
-        builder = _apply_input_config(builder, input_config)
-
-        evolution_cfg = _as_mapping(_pop_any(raw, ("evolution", "dynamics"), None), name="evolution")
         tau = _pop_any(raw, ("tau",), None)
-        if tau is not None and "tau" not in evolution_cfg:
-            evolution_cfg["tau"] = tau
         model_cfg = _as_mapping(_pop_any(raw, ("model_kwargs", "model_params", "model_config"), None), name="model_kwargs")
-        if model_cfg:
-            builder.model(**model_cfg)
-        if evolution_cfg:
-            builder.evolution(**evolution_cfg)
-
-        hamiltonian_cfg = _as_mapping(_pop_any(raw, ("hamiltonian", "hamiltonian_kwargs"), None), name="hamiltonian")
-        for key in ("h0", "h1", "H0", "H1", "h0_terms", "h1_terms", "h0_matrix", "h1_matrix", "kind", "hamiltonian_kind"):
-            if key in raw:
-                hamiltonian_cfg[key] = raw.pop(key)
-        if hamiltonian_cfg:
-            builder.hamiltonian(**hamiltonian_cfg)
-
-        circuit = _pop_any(raw, ("circuit", "quantum_circuit"), None)
-        circuit_kwargs = _as_mapping(_pop_any(raw, ("circuit_kwargs", "circuit_config"), None), name="circuit_kwargs")
-        if circuit is not None:
-            builder.circuit(circuit, **circuit_kwargs)
-
-        existing = _pop_any(raw, ("reservoir", "object"), None)
-        if existing is not None:
-            builder.use(existing)
-
-        builder = _apply_readout_config(builder, raw)
-        raw.pop("readout", None)
-        raw.pop("observables", None)
+        readout = _readout_from_config(_pop_any(raw, ("readout",), None))
 
         if raw:
-            builder.model(**raw)
-        builder._backend = backend_name
-        return builder
+            raise ValueError(f"Unknown reservoir config fields: {sorted(raw)}")
+        spec = _spec_from_parts(
+            preset_name=preset_name,
+            n_memory=n_memory,
+            n_readout=n_readout,
+            seed=seed,
+            tau=tau,
+            encoding=encoding,
+            dynamics=dynamics,
+            runtime=dynamics_runtime,
+            readout=readout,
+            model_kwargs=model_cfg,
+        )
+        return ReservoirBuilder(spec, _backend=backend_name)
 
     @classmethod
     def from_dict(cls, config: Mapping[str, Any]) -> Any:

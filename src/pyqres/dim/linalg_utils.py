@@ -10,7 +10,7 @@ are reported close to the actual source of instability.
 """
 
 from math import factorial
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import numpy as np
 import scipy.linalg as la

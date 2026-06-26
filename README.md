@@ -5,15 +5,18 @@ shared interfaces for constructing reservoirs, running generic supervised
 experiments, simulating exact small systems, building Qiskit circuits, and
 performing PTM/Volterra/dimensional analysis.
 
-Benchmark task presets have moved to the separate `pyqres-tasks` package. The
-legacy task-integrated code line is preserved on the `release/v0.1.x` branch.
+Benchmark task presets live in the separate `pyqres-tasks` package.
 
 ## Design
 
 The package is organized around a few public layers:
 
-- `pyqres.core`: backend-neutral Hamiltonian objects, reservoir specs,
-  reservoir construction, fluent reservoir builders, and protocols.
+- `pyqres.core`: backend-neutral reservoir specs, input-encoding specs,
+  dynamics specs, readout specs, reservoir construction, dictionary-first
+  builders, and protocols.
+- `pyqres.presets`: optional adapters for named reservoir families such as
+  Ising, RandomPauli, and SYK. Presets fill generic core specs; they are not
+  the core abstraction.
 - `pyqres.simulation`: dense exact and finite-shot trajectory reservoirs.
 - `pyqres.qiskit`: Qiskit circuit reservoirs.
 - `pyqres.dim`: PTM, Volterra, visibility, and sweep-analysis tools.
@@ -24,10 +27,14 @@ The package is organized around a few public layers:
 
 The main public protocols are re-exported from both `pyqres` and `pyqres.core`:
 
-- `ReservoirBuilderProtocol`: chainable reservoir construction.
+- `InputEncodingSpecProtocol`, `DynamicsSpecProtocol`, and
+  `ReadoutSpecProtocol`: generic contracts for how inputs enter the reservoir,
+  how the reservoir evolves, and how features are extracted.
+- `ReservoirBuilderProtocol`: minimal inspect/build contract returned by
+  dictionary reservoir construction.
 - `TransformReservoirProtocol`: exposes `transform(inputs) -> features`.
 - `StatefulReservoirProtocol`: adds `reset(...)` and `step(u)`.
-- `QRCReservoirProtocol`: legacy-compatible `reset`, `step`, and `run`.
+- `QRCReservoirProtocol`: streaming `reset`, `step`, and `run` contract.
 - `ChannelReservoirProtocol`: adds channel/PTM access.
 - `CircuitReservoirProtocol`: exposes circuit construction.
 - `ReservoirSpecProtocol` and `SerializableSpecProtocol`: reservoir
@@ -42,9 +49,9 @@ For convenience, common APIs are re-exported from the top-level `pyqres`
 namespace. The implementation still lives in categorized packages:
 
 - `qres.qresreservoir.from_dict(...)` -> dictionary-first reservoir factory
-- `qres.reservoir(...)` -> `pyqres.core.fluent`
 - `qres.compile_reservoir(...)` -> `pyqres.core.builders`
-- `qres.ReservoirSpec` -> `pyqres.core.specs`
+- `qres.InputEncodingSpec`, `qres.DynamicsSpec`, `qres.ReadoutSpec`, and
+  `qres.ReservoirSpec` -> `pyqres.core.specs`
 - `qres.data.*`, `qres.readout.*`, and `qres.Experiment` ->
   `pyqres.experiments`
 
@@ -62,6 +69,24 @@ H(u) = H0 + input_scale * u * H1
 
 `H0` and `H1` can be represented as backend-neutral Hamiltonian specs, dense
 matrices, sparse matrices, or Qiskit operator objects where supported.
+
+The more general design is:
+
+```text
+features = readout(dynamics(encoding(inputs)))
+```
+
+For Hamiltonian reservoirs this usually becomes `H(u) = H0 + scale * u * H1`.
+For circuit reservoirs, `encoding` can describe circuit parameters or input
+state preparation. For user-provided reservoirs, these specs can be metadata
+while the object implements `transform`, `run_stream`, or `run`.
+
+Backend layers consume their own native artifacts. For example,
+`pyqres.qiskit.QRCReservoir` has two native dynamics modes:
+`SparsePauliOp` Hamiltonians evolved with `PauliEvolutionGate`, and raw
+`QuantumCircuit` blocks appended directly as the reservoir dynamics. Presets
+are adapter layers: they translate names such as `"Ising"` into the lower-level
+artifacts required by a selected backend.
 
 ## Installation
 
@@ -106,16 +131,22 @@ reservoir = qresreservoir.from_dict({
     "preset": "Ising",
     "memory_qubits": 3,
     "readout_qubits": 1,
-    "input": {"axis": "Z", "site": 0, "strength": 1.2},
-    "evolution": {
+    "encoding": {"mode": "hamiltonian", "operator": "Z", "targets": [0], "scale": 1.2},
+    "dynamics": {
+        "kind": "preset",
+        "name": "Ising",
         "tau": 0.6,
         "gx_memory": 0.9,
         "jzz_memory": 1.0,
         "gx_readout": 0.8,
         "kz_memory_readout": 0.6,
     },
-    "observables": {"preset": "rich", "count": 4},
-    "readout": {"include_bias": True, "init_state": "zero"},
+    "readout": {
+        "mode": "memory_observables",
+        "observables": {"preset": "rich", "count": 4},
+        "include_bias": True,
+        "init_state": "zero",
+    },
     "backend": "exact",
 })
 
@@ -163,19 +194,18 @@ The same `Dataset` and `Experiment` objects work with custom user tasks,
 
 ## Reservoir Dictionaries
 
-`qresreservoir.from_dict(...)` accepts a compact reservoir description and
+`qresreservoir.from_dict(...)` accepts a reservoir description and
 returns a compiled reservoir. Common fields are:
 
 - `preset`: built-in preset name such as `"Ising"`, `"RandomPauli"`, or `"SYK"`.
 - `memory_qubits` / `readout_qubits`: recurrent and readout register sizes.
-- `input`: scalar input encoding, for example `{"axis": "Z", "site": 0,
-  "strength": 1.2}`.
-- `evolution`: dynamics/model parameters such as `tau`, couplings, or preset
-  model options.
-- `observables`: memory-observable readout, for example `{"preset": "rich",
-  "count": 8}`.
+- `encoding`: scalar/vector input encoding metadata.
+- `dynamics`: explicit dynamics object or descriptor. The factory infers common
+  cases automatically: raw `QuantumCircuit` objects become circuit dynamics,
+  `(H0, H1)` pairs or Hamiltonian mappings become Hamiltonian dynamics, and
+  objects exposing `transform`, `run_stream`, or `run` are used directly.
 - `readout`: feature readout options such as `mode`, `include_bias`,
-  `init_state`, `shots`, and `shot_noise`.
+  `init_state`, `shots`, `shot_noise`, and observable selections.
 - `backend`: compiler target, for example `"exact"`, `"memory_observable"`,
   `"hardware_trajectory"`, or `"qiskit"`.
 
@@ -185,7 +215,8 @@ The factory also supports explicit Hamiltonian reservoirs:
 reservoir = qres.qresreservoir.from_dict({
     "memory_qubits": 1,
     "readout_qubits": 1,
-    "hamiltonian": {
+    "encoding": {"mode": "hamiltonian", "operator": "Z", "targets": [1], "scale": 0.5},
+    "dynamics": {
         "h0_terms": [(1.0, ((0, "X"),))],
         "h1_terms": [(0.5, ((1, "Z"),))],
     },
@@ -206,7 +237,63 @@ quantum_circuit.cx(0, 1)
 reservoir = qres.qresreservoir.from_dict({
     "memory_qubits": 1,
     "readout_qubits": 1,
-    "circuit": quantum_circuit,
+    "dynamics": quantum_circuit,
+    "backend": "qiskit",
+})
+```
+
+The explicit tagged form is also accepted when that is clearer:
+
+```python
+reservoir = qres.qresreservoir.from_dict({
+    "memory_qubits": 1,
+    "readout_qubits": 1,
+    "dynamics": {"kind": "circuit", "circuit": quantum_circuit},
+    "backend": "qiskit",
+})
+```
+
+At the lower-level Qiskit API, Hamiltonian evolution takes Qiskit-native
+Hamiltonians directly:
+
+```python
+from qiskit.quantum_info import SparsePauliOp
+from pyqres.qiskit import QRCConfig, QRCReservoir
+
+reservoir = QRCReservoir(QRCConfig(
+    n_system=1,
+    n_ancilla=1,
+    reservoir_type="pauli_evolution",
+    H0_hamiltonian=SparsePauliOp.from_list([("XI", 1.0)]),
+    H1_hamiltonian=SparsePauliOp.from_list([("IZ", 0.5)]),
+))
+```
+
+For circuit dynamics, the lower-level Qiskit API takes the raw circuit:
+
+```python
+from qiskit import QuantumCircuit
+from pyqres.qiskit import QRCConfig, QRCReservoir
+
+circuit = QuantumCircuit(2)
+circuit.h(0)
+circuit.cx(0, 1)
+
+reservoir = QRCReservoir(QRCConfig(
+    n_system=1,
+    n_ancilla=1,
+    reservoir_type="custom_circuit",
+    reservoir_circuit=circuit,
+))
+```
+
+Preset helpers perform the translation when users stay at the high-level API:
+
+```python
+reservoir = qres.qresreservoir.from_dict({
+    "preset": "Ising",
+    "memory_qubits": 1,
+    "readout_qubits": 1,
     "backend": "qiskit",
 })
 ```
@@ -221,21 +308,6 @@ builder = qres.qresreservoir.builder_from_dict({
     "backend": "exact",
 })
 reservoir = builder.build()
-```
-
-The fluent chain remains available for interactive work and mirrors the same
-settings:
-
-```python
-reservoir = (
-    qres.reservoir("ising")
-    .memory_qubits(5)
-    .readout_qubits(2)
-    .input("Z", site=0, strength=1.2)
-    .evolution(tau=0.6)
-    .observables("rich", count=8)
-    .backend("exact")
-)
 ```
 
 ## Config-Driven Runs
@@ -272,7 +344,7 @@ paths:
 Run it with:
 
 ```bash
-pyqres-run experiment.yaml
+python -m pyqres.experiments.cli experiment.yaml
 ```
 
 The runner writes `metrics.json`, `metadata.json`, and `arrays.npz` containing
@@ -300,7 +372,7 @@ result = run_experiment_from_config({
 
 ## Reservoir Specs
 
-Both the dictionary API and fluent API build `ReservoirSpec` objects internally.
+The dictionary API builds `ReservoirSpec` objects internally.
 For lower-level workflows, specs can still be created and compiled directly:
 
 ```python

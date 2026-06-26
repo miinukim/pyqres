@@ -27,7 +27,9 @@ def _select_observable_specs(model: Any, readout: ReadoutSpec) -> list[str]:
 
 
 def _preset_key(spec: ReservoirSpec) -> str:
-    return str(spec.preset or spec.family or "ising").lower()
+    from pyqres import presets
+
+    return presets.preset_key(spec)
 
 
 def build_dimension_model(spec: ReservoirSpec) -> Any:
@@ -36,39 +38,9 @@ def build_dimension_model(spec: ReservoirSpec) -> Any:
     if spec.source_kind.lower() == "object" and "model" in spec.runtime:
         return spec.runtime["model"]
 
-    from pyqres.dim import (
-        IsingReservoirModel,
-        IsingReservoirParameters,
-        RandomPauliReservoirModel,
-        RandomPauliReservoirParameters,
-        SYKReservoirModel,
-        SYKReservoirParameters,
-    )
+    from pyqres import presets
 
-    preset = _preset_key(spec)
-    model_registry = {
-        "ising": (IsingReservoirParameters, IsingReservoirModel),
-        "ising.memory_readout": (IsingReservoirParameters, IsingReservoirModel),
-        "random_pauli": (RandomPauliReservoirParameters, RandomPauliReservoirModel),
-        "randompauli": (RandomPauliReservoirParameters, RandomPauliReservoirModel),
-        "syk": (SYKReservoirParameters, SYKReservoirModel),
-    }
-    try:
-        parameter_cls, model_cls = model_registry[preset]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported dimension-model preset '{preset}'") from exc
-
-    kwargs = {
-        "n_memory": spec.system_qubits,
-        "n_readout": spec.ancilla_qubits,
-        **dict(spec.model_kwargs),
-    }
-    if "tau" in getattr(parameter_cls, "__dataclass_fields__", {}):
-        kwargs.setdefault("tau", float(spec.tau))
-    if "seed" in getattr(parameter_cls, "__dataclass_fields__", {}):
-        kwargs.setdefault("seed", int(spec.seed))
-    params = parameter_cls(**kwargs)
-    return model_cls(params)
+    return presets.build_dimension_model(spec)
 
 
 def _normalize_hamiltonian_kwargs(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -96,9 +68,10 @@ def _normalize_hamiltonian_kwargs(raw: Mapping[str, Any]) -> dict[str, Any]:
 def build_hamiltonian_params(spec: ReservoirSpec) -> dict[str, Any]:
     """Build backend-neutral Hamiltonian parameters for simulation backends."""
 
-    kwargs = _normalize_hamiltonian_kwargs(spec.hamiltonian_kwargs)
+    kwargs = _normalize_hamiltonian_kwargs({**dict(spec.dynamics.parameters), **dict(spec.hamiltonian_kwargs)})
     source_kind = spec.source_kind.lower()
-    if source_kind == "hamiltonian":
+    dynamics_kind = spec.dynamics.kind.lower()
+    if source_kind == "hamiltonian" or dynamics_kind == "hamiltonian":
         kwargs.setdefault("n_system", spec.system_qubits)
         kwargs.setdefault("n_ancilla", spec.ancilla_qubits)
         kwargs.setdefault("tau", float(spec.tau))
@@ -110,20 +83,9 @@ def build_hamiltonian_params(spec: ReservoirSpec) -> dict[str, Any]:
                 kwargs["hamiltonian_kind"] = "matrix"
         return ReservoirParams(**kwargs).generate()
 
-    preset = _preset_key(spec)
-    if preset in {"ising", "ising.memory_readout"}:
-        return ReservoirParams.ising_type(
-            n_system=spec.system_qubits,
-            n_ancilla=spec.ancilla_qubits,
-            tau=float(spec.tau),
-            seed=int(spec.seed),
-            **kwargs,
-        ).generate()
-    raise ValueError(
-        f"Preset '{preset}' does not define a dense Hamiltonian. "
-        "Provide .hamiltonian(...) for exact/qiskit Hamiltonian evolution, "
-        "or use backend='memory_observable' for dimension-model presets."
-    )
+    from pyqres import presets
+
+    return presets.build_hamiltonian_params(spec)
 
 
 def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
@@ -191,6 +153,7 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
         )
     if backend_key == "qiskit":
         from pyqres.qiskit import QRCConfig, QRCReservoir
+        from pyqres import presets
 
         circuit_kwargs = dict(spec.circuit_kwargs)
         if spec.source_kind.lower() == "circuit":
@@ -214,19 +177,17 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
                 QRCConfig(**qiskit_kwargs)
             )
 
-        params = build_hamiltonian_params(spec)
+        artifacts = presets.build_qiskit_artifacts(spec)
         qiskit_kwargs = {
             "n_system": spec.system_qubits,
             "n_ancilla": spec.ancilla_qubits,
             "tau": float(spec.tau),
             "input_scale": float(spec.input_scale),
-            "H0_hamiltonian": params["H0_hamiltonian"],
-            "H1_hamiltonian": params["H1_hamiltonian"],
             "seed": int(spec.seed),
             "include_bias": bool(readout.include_bias),
             "shots": int(readout.shots),
-            "reservoir_type": "pauli_evolution",
         }
+        qiskit_kwargs.update(artifacts)
         qiskit_kwargs.update(circuit_kwargs)
         return QRCReservoir(
             QRCConfig(**qiskit_kwargs)

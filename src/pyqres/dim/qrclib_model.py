@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Sequence
-
 import numpy as np
 
 from .linalg_utils import ensure_finite
