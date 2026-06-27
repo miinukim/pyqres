@@ -50,7 +50,7 @@ A pyqres experiment has four pieces:
 - `readout`: fits predictions from reservoir features.
 - `metrics`: scores train and test predictions.
 
-Reservoirs can come from built-in presets, explicit Hamiltonians, raw Qiskit circuits, or your own Python object. The core rule is simple: if an object exposes `transform(inputs)`, `run_stream(inputs)`, or `run(inputs)`, pyqres can use it in an `Experiment`.
+Reservoirs can come from built-in presets, explicit Hamiltonians, raw Qiskit circuits, or your own Python object. The core rule is simple: if an object exposes `run(inputs)`, `run_stream(inputs)`, or `transform(inputs)`, pyqres can use it in an `Experiment`.
 
 ## Installation
 
@@ -238,6 +238,7 @@ Accepted top-level reservoir dictionary fields:
 | `readout` | `dict` or `ReadoutSpec` | Feature extraction options. See readout options below. | memory observables, `z` |
 | `backend` | `str` | `exact`, `dense`, `channel_map`, `memory_observable`, `dim`, `hardware`, `hardware_trajectory`, `qiskit`. | `exact` |
 | `model_kwargs` | `dict` | Extra preset/model constructor parameters. Aliases: `model_params`, `model_config`. | `{}` |
+| `qiskit` | `dict` | Qiskit backend options such as `simulator_method`, `simulator_device`, `use_noise_model`, and `aer_options`. Aliases: `qiskit_kwargs`, `simulator`. | `{}` |
 
 Legacy top-level fields such as `input`, `evolution`, `observables`, `hamiltonian`, and `circuit` are intentionally not accepted. Put those concepts under `encoding`, `dynamics`, or `readout`.
 
@@ -271,7 +272,7 @@ The factory infers dynamics from the object you pass:
 | `(H0, H1)` | Two-item Hamiltonian pair. |
 | raw Qiskit-like circuit object | Any object with `num_qubits` and `to_instruction`; compiled with `backend="qiskit"`. |
 | `{"kind": "circuit", "circuit": circuit, ...}` | Explicit circuit dynamics with extra circuit kwargs. |
-| existing reservoir object | Any object exposing `transform`, `run_stream`, `run`, or `step`. |
+| existing reservoir object | Any object exposing `run`, `run_stream`, `transform`, or `step`. |
 | `{"kind": "object", "reservoir": obj}` | Explicit existing-reservoir dynamics. |
 
 Built-in preset parameter choices:
@@ -320,7 +321,7 @@ Observable presets for SYK memory models:
 | `exact`, `dense`, `channel_map` | `ChannelMapReservoir` | Dense exact deterministic channel-map features. If readout mode is `memory_observables`, `exact`/`dense` are redirected to `memory_observable`. |
 | `memory_observable`, `dim` | `MemoryObservableStreamingReservoir` | Dimension-model memory observable features. Supports Ising, RandomPauli, and SYK presets. |
 | `hardware`, `hardware_trajectory` | `HardwareTrajectoryReservoir` | Dense finite-shot trajectory emulator. |
-| `qiskit` | `QRCReservoir` | Builds Qiskit circuits. Preset Hamiltonians are converted to `SparsePauliOp`; raw circuits are appended directly. |
+| `qiskit` | `QRCReservoir` | Builds Qiskit circuits. Hamiltonian dynamics are converted to `SparsePauliOp` for `PauliEvolutionGate`; the Hamiltonian may come from a preset or from explicit user-supplied Hamiltonian objects. Raw circuits are appended directly. |
 
 ### Dataset Builder Options
 
@@ -384,7 +385,7 @@ If `metrics=None`, pyqres uses `r2` and `mse`.
 
 | Parameter | Choices / meaning | Default |
 | --- | --- | --- |
-| `reservoir` | Any object exposing `transform(inputs)`, `run_stream(inputs)`, or `run(inputs)`. | required |
+| `reservoir` | Any object exposing `run(inputs)`, `run_stream(inputs)`, or `transform(inputs)`. | required |
 | `dataset` | A `Dataset` with `inputs`, `targets`, and split indices. | required |
 | `readout` | Any object exposing `fit(features, targets)` and `predict(features)`. Common choice: `qres.readout.Ridge(...)`. | `Ridge()` |
 | `metrics` | `None`, a list/tuple of metric names, or a mapping of names to callables. Built-in names: `r2`, `mse`, `rmse`, `negative_rmse`. | `None` |
@@ -431,6 +432,7 @@ reservoir = qres.compile_reservoir(spec, backend="exact")
 | `model_kwargs` | Dimension-model/preset kwargs. |
 | `hamiltonian_kwargs` | Hamiltonian-generation kwargs. |
 | `circuit_kwargs` | Qiskit circuit backend kwargs. |
+| `qiskit_kwargs` | Qiskit simulator/backend kwargs from the public `qiskit` config block. |
 | `runtime` | Non-serializable runtime objects such as raw circuits or reservoir objects. |
 
 ### Qiskit Low-Level Options
@@ -460,9 +462,28 @@ reservoir = QRCReservoir(QRCConfig(
 | `input_map` | `global`, `per_qubit_random_sign` |
 | `ancilla_pattern` | `star`, `pairwise` |
 | `readout` | `z_local`, `z_local_plus_anc`, `pauli_k_local` |
-| `simulator_method` | `automatic`, `density_matrix`, `statevector` |
+| `simulator_method` | `automatic`, `statevector`, `density_matrix`, `matrix_product_state`, `stabilizer`, `extended_stabilizer`, `unitary`, `superop`, `tensor_network` |
+| `simulator_device` | `automatic`, `CPU`, `GPU` |
 
-Other useful `QRCConfig` fields: `n_system`, `n_ancilla`, `reservoir_circuit`, `reservoir_circuit_targets`, `H0_hamiltonian`, `H1_hamiltonian`, `evolution_reps`, `evolution_order`, `evolution_insert_barriers`, `evolution_preserve_order`, `depth_per_step`, `tau`, `seed`, `input_scale`, `use_purification`, `measure_and_reset_ancilla`, `pauli_k`, `include_bias`, `shots`, `transpile_optimization_level`, `noise`, and `control`.
+Other useful `QRCConfig` fields: `n_system`, `n_ancilla`, `reservoir_circuit`, `reservoir_circuit_targets`, `H0_hamiltonian`, `H1_hamiltonian`, `evolution_reps`, `evolution_order`, `evolution_insert_barriers`, `evolution_preserve_order`, `depth_per_step`, `tau`, `seed`, `input_scale`, `use_purification`, `measure_and_reset_ancilla`, `pauli_k`, `include_bias`, `shots`, `use_noise_model`, `aer_options`, `transpile_optimization_level`, `noise`, and `control`.
+
+The dictionary-first API accepts the same simulator controls under `qiskit`:
+
+```python
+reservoir = qres.qresreservoir.from_dict({
+    "memory_qubits": 4,
+    "readout_qubits": 2,
+    "backend": "qiskit",
+    "qiskit": {
+        "simulator_method": "matrix_product_state",
+        "simulator_device": "CPU",
+        "use_noise_model": False,
+        "aer_options": {"max_parallel_threads": 8},
+    },
+})
+```
+
+For a CUDA-enabled Aer installation, switch to `{"simulator_method": "statevector", "simulator_device": "GPU"}`. Use `matrix_product_state` for locally entangled circuit reservoirs; use `statevector`/`GPU` for dense ideal circuit simulation when VRAM is the main limit.
 
 `NoiseConfig` fields: `use_damping`, `dt`, `T1`, `T2`, `use_depolarizing`, `p_depol_1q`, `p_depol_2q`.
 

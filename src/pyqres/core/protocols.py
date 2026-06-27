@@ -161,6 +161,10 @@ class QiskitReservoirConfigProtocol(Protocol):
     seed: int
     include_bias: bool
     shots: int
+    simulator_method: str
+    simulator_device: str
+    use_noise_model: bool
+    aer_options: Mapping[str, Any]
 
     def total_qubits(self) -> int:
         ...
@@ -290,6 +294,7 @@ class ReservoirSpecProtocol(SerializableSpecProtocol, Protocol):
     model_kwargs: Mapping[str, Any]
     hamiltonian_kwargs: Mapping[str, Any]
     circuit_kwargs: Mapping[str, Any]
+    qiskit_kwargs: Mapping[str, Any]
     runtime: Mapping[str, Any]
 
     @property
@@ -328,7 +333,7 @@ class ReservoirCompilerProtocol(Protocol):
 
 
 @runtime_checkable
-class TransformFunctionProtocol(Protocol):
+class RunFunctionProtocol(Protocol):
     """Function contract for running any supported reservoir object on inputs."""
 
     def __call__(self, reservoir: Any, inputs: InputSequence) -> FeatureMatrix:

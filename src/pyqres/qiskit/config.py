@@ -19,6 +19,18 @@ EncodingType = Literal["rz_global", "rz_per_qubit"]
 ReservoirType = Literal["random_cx_rz", "pauli_evolution", "custom_circuit"]
 EvolutionSynthesisType = Literal["default", "lie_trotter", "suzuki_trotter"]
 ReadoutType = Literal["z_local", "z_local_plus_anc", "pauli_k_local"]
+SimulatorMethodType = Literal[
+    "automatic",
+    "statevector",
+    "density_matrix",
+    "matrix_product_state",
+    "stabilizer",
+    "extended_stabilizer",
+    "unitary",
+    "superop",
+    "tensor_network",
+]
+SimulatorDeviceType = Literal["automatic", "CPU", "GPU"]
 
 @dataclass
 class NoiseConfig:
@@ -102,10 +114,26 @@ class QRCConfig:
     pauli_k: int = 2
     include_bias: bool = True
     shots: int = 2048
-    simulator_method: Literal["automatic", "density_matrix", "statevector"] = "density_matrix"
+    simulator_method: SimulatorMethodType = "density_matrix"
+    simulator_device: SimulatorDeviceType = "automatic"
+    use_noise_model: bool = True
+    aer_options: dict[str, Any] = field(default_factory=dict)
     transpile_optimization_level: int = 1
     noise: NoiseConfig = field(default_factory=NoiseConfig)
     control: MeasurementControlConfig = field(default_factory=MeasurementControlConfig)
+
+    def __post_init__(self) -> None:
+        """Normalize dictionary inputs accepted through qresreservoir.from_dict."""
+
+        if isinstance(self.noise, dict):
+            self.noise = NoiseConfig(**self.noise)
+        self.aer_options = dict(self.aer_options or {})
+        if self.simulator_device not in {"automatic", "CPU", "GPU"}:
+            upper = str(self.simulator_device).upper()
+            if upper in {"CPU", "GPU"}:
+                self.simulator_device = upper  # type: ignore[assignment]
+            else:
+                raise ValueError(f"Unsupported simulator_device '{self.simulator_device}'.")
 
     def total_qubits(self) -> int:
         """Return system plus ancilla qubit count."""

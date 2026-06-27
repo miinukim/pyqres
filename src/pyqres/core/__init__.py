@@ -1,8 +1,8 @@
 """Public core API for shared reservoir protocols and configuration helpers."""
 
 from .control import MeasurementControlConfig
-from .builders import build_dimension_model, build_hamiltonian_params, compile_reservoir, transform
-from .fluent import qresreservoir
+from .builders import build_dimension_model, build_hamiltonian_params, build_qiskit_hamiltonian_artifacts, compile_reservoir, run
+from .factory import qresreservoir
 from .protocols import (
     BackendLike,
     BatchReservoirProtocol,
@@ -53,7 +53,7 @@ from .protocols import (
     TaskDatasetFactoryProtocol,
     TaskRunnerProtocol,
     TimeSeriesDataBuilderProtocol,
-    TransformFunctionProtocol,
+    RunFunctionProtocol,
     TransformReservoirProtocol,
 )
 from .reservoir_params import (
@@ -128,10 +128,11 @@ __all__ = [
     "TaskDatasetFactoryProtocol",
     "TaskRunnerProtocol",
     "TimeSeriesDataBuilderProtocol",
-    "TransformFunctionProtocol",
+    "RunFunctionProtocol",
     "TransformReservoirProtocol",
     "build_dimension_model",
     "build_hamiltonian_params",
+    "build_qiskit_hamiltonian_artifacts",
     "compile_reservoir",
     "dense_hamiltonian_matrix",
     "normalize_pauli_term",
@@ -139,5 +140,5 @@ __all__ = [
     "pauli_terms_matrix",
     "pauli_terms_to_labels",
     "pauli_terms_to_sparse_pauli_op",
-    "transform",
+    "run",
 ]

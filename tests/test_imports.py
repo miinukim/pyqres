@@ -42,7 +42,7 @@ def test_core_imports():
         TaskDatasetFactoryProtocol,
         TaskRunnerProtocol,
         TimeSeriesDataBuilderProtocol,
-        TransformFunctionProtocol,
+        RunFunctionProtocol,
         TransformReservoirProtocol,
     )
 
@@ -86,7 +86,7 @@ def test_core_imports():
     assert TaskDatasetFactoryProtocol is not None
     assert TaskRunnerProtocol is not None
     assert TimeSeriesDataBuilderProtocol is not None
-    assert TransformFunctionProtocol is not None
+    assert RunFunctionProtocol is not None
     assert ConfigMapping is not None
     assert ReservoirRunResult is not None
     assert ReservoirStepResult is not None
@@ -191,7 +191,14 @@ def test_qiskit_hamiltonian_like_inputs():
         reservoir_type="pauli_evolution",
         H0_hamiltonian=ising_params["H0_hamiltonian"].to_sparse_pauli_op(),
         H1_hamiltonian=ising_params["H1_hamiltonian"].to_sparse_pauli_op(),
+        simulator_method="matrix_product_state",
+        simulator_device="cpu",
+        use_noise_model=False,
+        aer_options={"max_parallel_threads": 1},
     )
+    assert qiskit_cfg.simulator_method == "matrix_product_state"
+    assert qiskit_cfg.simulator_device == "CPU"
+    assert qiskit_cfg.aer_options["max_parallel_threads"] == 1
     assert isinstance(qiskit_cfg, QiskitReservoirConfigProtocol)
     qiskit_reservoir = QRCReservoir(qiskit_cfg)
     assert isinstance(qiskit_reservoir.H0_hamiltonian, qi.SparsePauliOp)
@@ -471,7 +478,7 @@ def test_dictionary_explicit_hamiltonian_is_not_preset_bound():
             "backend": "exact",
         }
     )
-    features = qres.transform(reservoir, np.array([0.0, 0.1, 0.2]))
+    features = qres.run(reservoir, np.array([0.0, 0.1, 0.2]))
 
     assert features.shape == (3, 2)
 
@@ -490,7 +497,7 @@ def test_dimension_presets_are_presets_not_core_families():
             "backend": "memory_observable",
         }
     )
-    features = qres.transform(reservoir, np.array([0.0, 0.1, 0.2]))
+    features = qres.run(reservoir, np.array([0.0, 0.1, 0.2]))
 
     assert features.shape == (3, 3)
 
@@ -505,7 +512,7 @@ def test_builder_can_use_existing_reservoir_object():
             return np.hstack([np.ones_like(x), x])
 
     reservoir = qres.qresreservoir.from_dict({"memory_qubits": 1, "readout_qubits": 1, "dynamics": ExistingReservoir(), "backend": "exact"})
-    features = qres.transform(reservoir, np.array([0.2, 0.4]))
+    features = qres.run(reservoir, np.array([0.2, 0.4]))
 
     assert features.tolist() == [[1.0, 0.2], [1.0, 0.4]]
 
@@ -572,12 +579,65 @@ def test_custom_qiskit_circuit_reservoir_compiles():
     assert inferred_circuit.num_qubits == 2
 
 
+def test_qiskit_explicit_sparse_pauli_hamiltonian_dynamics():
+    import pytest
+    import pyqres as qres
+
+    qi = pytest.importorskip("qiskit.quantum_info")
+
+    h0 = qi.SparsePauliOp.from_list([("XI", 1.0)])
+    h1 = qi.SparsePauliOp.from_list([("IZ", 0.5)])
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "dynamics": {"kind": "hamiltonian", "h0": h0, "h1": h1},
+            "backend": "qiskit",
+        }
+    )
+
+    assert isinstance(reservoir.H0_hamiltonian, qi.SparsePauliOp)
+    assert isinstance(reservoir.H1_hamiltonian, qi.SparsePauliOp)
+    circuit = reservoir.build_executable_circuit([0.1], measure_system=False)
+    assert circuit.num_qubits == 2
+    assert "PauliEvolution" not in "".join(circuit.count_ops().keys())
+
+
+def test_qiskit_backend_options_from_dict():
+    import pytest
+    import pyqres as qres
+
+    qi = pytest.importorskip("qiskit.quantum_info")
+
+    h0 = qi.SparsePauliOp.from_list([("XI", 1.0)])
+    h1 = qi.SparsePauliOp.from_list([("IZ", 0.5)])
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "dynamics": {"kind": "hamiltonian", "h0": h0, "h1": h1},
+            "backend": "qiskit",
+            "qiskit": {
+                "simulator_method": "matrix_product_state",
+                "simulator_device": "CPU",
+                "use_noise_model": False,
+                "aer_options": {"max_parallel_threads": 1},
+            },
+        }
+    )
+
+    assert reservoir.cfg.simulator_method == "matrix_product_state"
+    assert reservoir.cfg.simulator_device == "CPU"
+    assert reservoir.cfg.use_noise_model is False
+    assert reservoir.cfg.aer_options["max_parallel_threads"] == 1
+
+
 def test_qresreservoir_from_dict_api():
     import numpy as np
     import pytest
 
     from qres import qresreservoir as short_factory
-    from pyqres import ReservoirBuilderProtocol, ReservoirFactoryProtocol, qresreservoir, transform
+    from pyqres import ReservoirBuilderProtocol, ReservoirFactoryProtocol, qresreservoir, run
 
     assert short_factory is qresreservoir
     assert isinstance(qresreservoir, ReservoirFactoryProtocol)
@@ -606,7 +666,7 @@ def test_qresreservoir_from_dict_api():
             "backend": "exact",
         }
     )
-    features = transform(reservoir, np.array([0.0, 0.1, 0.2]))
+    features = run(reservoir, np.array([0.0, 0.1, 0.2]))
 
     assert features.shape == (3, 2)
 
@@ -625,7 +685,7 @@ def test_qresreservoir_from_dict_api():
 def test_qresreservoir_from_dict_explicit_hamiltonian():
     import numpy as np
 
-    from pyqres import qresreservoir, transform
+    from pyqres import qresreservoir, run
 
     reservoir = qresreservoir.from_dict(
         {
@@ -639,7 +699,7 @@ def test_qresreservoir_from_dict_explicit_hamiltonian():
             "backend": "exact",
         }
     )
-    features = transform(reservoir, np.array([0.0, 0.1]))
+    features = run(reservoir, np.array([0.0, 0.1]))
 
     assert features.shape == (2, 2)
 
@@ -647,7 +707,7 @@ def test_qresreservoir_from_dict_explicit_hamiltonian():
 def test_qresreservoir_accepts_general_encoding_and_dynamics_dicts():
     import numpy as np
 
-    from pyqres import DynamicsSpec, InputEncodingSpec, qresreservoir, transform
+    from pyqres import DynamicsSpec, InputEncodingSpec, qresreservoir, run
 
     reservoir = qresreservoir.from_dict(
         {
@@ -686,7 +746,7 @@ def test_qresreservoir_accepts_general_encoding_and_dynamics_dicts():
     assert builder.spec.dynamics.name == "ising"
     assert builder.spec.encoding.parameters["normalization"] == "none"
     assert builder.spec.dynamics.parameters["tau"] == 0.1
-    features = transform(reservoir, np.array([0.0, 0.1]))
+    features = run(reservoir, np.array([0.0, 0.1]))
 
     assert features.shape == (2, 2)
 
@@ -708,7 +768,7 @@ def test_qresreservoir_infers_dynamics_from_instances_and_shapes():
             "backend": "exact",
         }
     )
-    pair_features = qres.transform(pair_reservoir, np.array([0.0, 0.1]))
+    pair_features = qres.run(pair_reservoir, np.array([0.0, 0.1]))
     assert pair_features.shape == (2, 2)
 
     mapping_reservoir = qres.qresreservoir.from_dict(
@@ -723,7 +783,7 @@ def test_qresreservoir_infers_dynamics_from_instances_and_shapes():
             "backend": "exact",
         }
     )
-    mapping_features = qres.transform(mapping_reservoir, np.array([0.0, 0.1]))
+    mapping_features = qres.run(mapping_reservoir, np.array([0.0, 0.1]))
     assert mapping_features.shape == (2, 2)
 
     class ExistingReservoir:
@@ -739,5 +799,5 @@ def test_qresreservoir_infers_dynamics_from_instances_and_shapes():
             "backend": "exact",
         }
     )
-    object_features = qres.transform(object_reservoir, np.array([0.2, 0.4]))
+    object_features = qres.run(object_reservoir, np.array([0.2, 0.4]))
     assert object_features.tolist() == [[1.0, 0.2], [1.0, 0.4]]

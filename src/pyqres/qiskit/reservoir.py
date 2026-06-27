@@ -298,9 +298,25 @@ class QRCReservoir:
         if backend is None:
             if AerSimulator is None:
                 raise ImportError("qiskit-aer is required for AerSimulator.")
-            if noise_model is None:
+            if noise_model is None and cfg.use_noise_model:
                 noise_model = cfg.noise.to_noise_model()
-            backend = AerSimulator(method=cfg.simulator_method, noise_model=noise_model, seed_simulator=seed_simulator)
+            backend_options: dict[str, Any] = {
+                "method": cfg.simulator_method,
+                "seed_simulator": seed_simulator,
+                **dict(cfg.aer_options),
+            }
+            if cfg.simulator_device != "automatic":
+                backend_options["device"] = cfg.simulator_device
+            if noise_model is not None:
+                backend_options["noise_model"] = noise_model
+            backend = AerSimulator(**backend_options)
+        if transpile is None:
+            raise ImportError("qiskit is required to transpile circuits for Aer execution.")
+        qc = transpile(
+            qc,
+            backend=backend,
+            optimization_level=int(cfg.transpile_optimization_level),
+        )
         job = backend.run(qc, shots=cfg.shots)
         counts = job.result().get_counts(0)
         return self.features_from_counts(counts, sys_bits, anc_bits)

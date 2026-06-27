@@ -217,33 +217,14 @@ def build_hamiltonian_params(spec: ReservoirSpec) -> dict[str, Any]:
 def build_qiskit_artifacts(spec: ReservoirSpec) -> dict[str, Any]:
     """Build Qiskit-native artifacts required by the Qiskit reservoir backend.
 
-    Qiskit execution layers should receive Qiskit-native objects, not named
-    presets or pyqres-specific Hamiltonian wrappers. This adapter is the bridge
-    from built-in presets to lower-level Qiskit artifacts.
+    Compatibility wrapper for the core Hamiltonian-to-Qiskit adapter. Presets
+    are only one possible source of Hamiltonians; explicit user Hamiltonians use
+    the same conversion path.
     """
 
-    try:
-        from qiskit.quantum_info import Operator, SparsePauliOp
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise ImportError("qiskit is required to build Qiskit preset artifacts.") from exc
+    from pyqres.core.builders import build_qiskit_hamiltonian_artifacts
 
-    from pyqres.core.reservoir_params import dense_hamiltonian_matrix
-
-    def to_sparse_pauli_op(name: str, value: Any) -> Any:
-        if value is None:
-            return SparsePauliOp.from_list([("I" * (spec.system_qubits + spec.ancilla_qubits), 0.0)])
-        if isinstance(value, SparsePauliOp):
-            return value
-        if hasattr(value, "to_sparse_pauli_op") and callable(value.to_sparse_pauli_op):
-            return value.to_sparse_pauli_op()
-        return SparsePauliOp.from_operator(Operator(dense_hamiltonian_matrix(value)))
-
-    params = build_hamiltonian_params(spec)
-    return {
-        "reservoir_type": "pauli_evolution",
-        "H0_hamiltonian": to_sparse_pauli_op("H0_hamiltonian", params["H0_hamiltonian"]),
-        "H1_hamiltonian": to_sparse_pauli_op("H1_hamiltonian", params["H1_hamiltonian"]),
-    }
+    return build_qiskit_hamiltonian_artifacts(spec)
 
 
 def get(name: str, **kwargs: object) -> ReservoirSpec:

@@ -16,7 +16,7 @@ user config / Python dict
     -> ReservoirSpec + InputEncodingSpec + DynamicsSpec + ReadoutSpec
     -> compile_reservoir(...)
     -> executable reservoir object
-    -> transform/run_stream/run(inputs)
+    -> run/run_stream/transform(inputs)
     -> feature matrix
     -> Experiment(dataset, readout, metrics).run()
 ```
@@ -73,7 +73,7 @@ result = qres.Experiment(
    - `memory_observable`/`dim`: `MemoryObservableStreamingReservoir`
    - `qiskit`: `QRCReservoir`
    - `object`: returns the user-supplied reservoir directly
-5. `transform` runs any object exposing `transform`, `run_stream`, or `run`.
+5. `run` runs any object exposing `run`, `run_stream`, or `transform`.
 6. `Experiment.run` fits the readout on train indices and scores train/test metrics.
 
 ## Dynamics Model
@@ -87,13 +87,13 @@ The core does not require Ising dynamics. It accepts generic dynamics in these f
 - Qiskit raw circuit object: any object with `num_qubits` and `to_instruction`
 - existing reservoir object: any object exposing `transform`, `run_stream`, `run`, or `step`
 
-Preset logic is deliberately separated in `pyqres.presets`. Qiskit-specific conversion is also isolated there: `build_qiskit_artifacts` converts preset Hamiltonian descriptions into `SparsePauliOp` objects before creating `QRCReservoir`.
+Preset logic is deliberately separated in `pyqres.presets`. Qiskit Hamiltonian conversion now lives in core: `build_qiskit_hamiltonian_artifacts` converts whichever Hamiltonian dynamics the spec contains into `SparsePauliOp` objects before creating `QRCReservoir`. A preset is only one possible source of those Hamiltonians.
 
 ## Package Exports
 
 `src/pyqres/__init__.py` is the public namespace. It exports:
 
-- construction helpers: `qresreservoir`, `compile_reservoir`, `transform`
+- construction helpers: `qresreservoir`, `compile_reservoir`, `run`
 - specs: `InputEncodingSpec`, `DynamicsSpec`, `ReadoutSpec`, `ReservoirSpec`
 - experiments: `Dataset`, `DatasetSplit`, `Experiment`, `ExperimentResult`, `Sweep`, `SweepResult`, `Ridge`
 - protocol types used by users and external packages
@@ -115,13 +115,14 @@ Preset logic is deliberately separated in `pyqres.presets`. Qiskit-specific conv
 - `ReadoutSpec.from_mapping`: constructs readout specs and normalizes `custom` observable lists to tuples.
 - `ReadoutSpec.to_dict`: serializes readout config, converting tuples/sequences to lists.
 - `ReservoirSpec`: complete task-agnostic construction record.
+- `ReservoirSpec.qiskit_kwargs`: backend-specific Qiskit/Aer simulator options kept separate from Hamiltonian and preset parameters.
 - `ReservoirSpec.with_updates`: returns a copy with selected fields replaced.
 - `ReservoirSpec.from_mapping`: builds a full spec from a mapping, recursively normalizing encoding/dynamics/readout.
 - `ReservoirSpec.to_dict`: serializes the spec; runtime objects are represented by `repr`.
 - `ReservoirSpec.system_qubits`: resolves `n_system` or `n_memory`, raising if neither is set.
 - `ReservoirSpec.ancilla_qubits`: resolves `n_ancilla` or `n_readout`, raising if neither is set.
 
-### `pyqres.core.fluent`
+### `pyqres.core.factory`
 
 - `ReservoirBuilder`: internal inspectable builder over an immutable `ReservoirSpec`.
 - `ReservoirBuilder.__init__`: stores a ready reservoir spec and default backend.
@@ -137,7 +138,7 @@ Preset logic is deliberately separated in `pyqres.presets`. Qiskit-specific conv
 - `_promoted_spec_updates`: promotes common dynamics parameters such as `tau` and `seed` to spec fields.
 - `_spec_from_parts`: assembles a full `ReservoirSpec` from normalized dictionary pieces.
 - `qresreservoir`: dictionary-first reservoir factory.
-- `qresreservoir.builder_from_dict`: builds a configured `ReservoirBuilder` from a plain mapping.
+- `qresreservoir.builder_from_dict`: builds a configured `ReservoirBuilder` from a plain mapping, including optional `qiskit`/`qiskit_kwargs`/`simulator` backend options.
 - `qresreservoir.from_dict`: builds and immediately compiles a reservoir from a mapping.
 
 ### `pyqres.core.builders`
@@ -147,8 +148,9 @@ Preset logic is deliberately separated in `pyqres.presets`. Qiskit-specific conv
 - `build_dimension_model`: builds or returns a dimension-analysis model for memory-observable backends.
 - `_normalize_hamiltonian_kwargs`: maps public Hamiltonian aliases such as `H0`, `h0`, and `kind` to `ReservoirParams` field names.
 - `build_hamiltonian_params`: returns backend-neutral `H0_hamiltonian` and `H1_hamiltonian` specs from explicit dynamics or presets.
+- `build_qiskit_hamiltonian_artifacts`: converts explicit or preset Hamiltonian dynamics into Qiskit-native `SparsePauliOp` artifacts for `PauliEvolutionGate`.
 - `compile_reservoir`: central compiler from `ReservoirSpec` to concrete backend reservoir object.
-- `transform`: runs a compatible reservoir through `transform`, `run_stream`, or `run`.
+- `run`: runs a compatible reservoir through `run`, `run_stream`, or `transform`.
 
 ### `pyqres.core.reservoir_params`
 
@@ -220,7 +222,7 @@ This module defines structural contracts for duck-typed objects. They are docume
 - `ReservoirBuilderProtocol.backend`: compile with backend.
 - `ReservoirBuilderProtocol.build`: compile current builder.
 - `ReservoirCompilerProtocol.__call__`: callable compiler contract.
-- `TransformFunctionProtocol.__call__`: contract for generic transform helper.
+- `RunFunctionProtocol.__call__`: contract for generic run helper.
 - `ReservoirFactoryProtocol.builder_from_dict`: dictionary-to-builder contract.
 - `ReservoirFactoryProtocol.from_dict`: dictionary-to-reservoir contract.
 - `PresetRegistryProtocol`: named preset registry and adapter contract.
@@ -248,7 +250,7 @@ This module defines structural contracts for duck-typed objects. They are docume
 - `_dimension_encoding_kwargs`: translates generic encoding metadata to dimension-model constructor kwargs.
 - `_hamiltonian_encoding_kwargs`: translates generic Hamiltonian encoding metadata to Ising Hamiltonian generator kwargs.
 - `build_hamiltonian_params`: builds backend-neutral Hamiltonians for Hamiltonian-compatible presets.
-- `build_qiskit_artifacts`: converts preset Hamiltonian artifacts into Qiskit-native `SparsePauliOp` fields.
+- `build_qiskit_artifacts`: compatibility wrapper around core `build_qiskit_hamiltonian_artifacts`.
 - `get`: returns a named preset spec.
 
 ### `pyqres.experiments.datasets`
@@ -396,6 +398,7 @@ This module defines structural contracts for duck-typed objects. They are docume
 - `NoiseConfig`: Qiskit Aer noise-model configuration.
 - `NoiseConfig.to_noise_model`: builds Aer damping/depolarizing noise model.
 - `QRCConfig`: Qiskit reservoir circuit configuration.
+- `QRCConfig.__post_init__`: normalizes dictionary noise/Aer options and case-insensitive simulator devices.
 - `QRCConfig.total_qubits`: returns `n_system + n_ancilla`.
 
 ### `pyqres.qiskit.reservoir`
@@ -416,7 +419,7 @@ This module defines structural contracts for duck-typed objects. They are docume
 - `QRCReservoir._z_expectation_from_counts`: estimates one `Z` expectation from counts.
 - `QRCReservoir._z_vector_from_counts`: estimates multiple `Z` expectations.
 - `QRCReservoir.features_from_counts`: converts counts into feature matrix.
-- `QRCReservoir.run_stream`: executes circuit on Aer/backend and returns features.
+- `QRCReservoir.run_stream`: executes a transpiled circuit on Aer/backend and returns features. Built-in options include `matrix_product_state`, `statevector`, CPU/GPU device selection, optional noise-model creation, and raw `aer_options`.
 
 ### `pyqres.dim.pauli`
 
@@ -659,6 +662,7 @@ This module defines structural contracts for duck-typed objects. They are docume
 ## Notes On Current Design Boundaries
 
 - The core is generic by spec and protocol. The old chainable builder surface has been removed from public exports; use `qresreservoir.from_dict`.
-- The Qiskit backend intentionally rejects pyqres Hamiltonian wrappers at the low level. Presets must be transformed to `SparsePauliOp` by `presets.build_qiskit_artifacts`, or users must supply Qiskit-native Hamiltonians themselves.
+- The Qiskit backend intentionally receives Qiskit-native `SparsePauliOp` objects at the low level. Core converts explicit or preset Hamiltonian dynamics through `build_qiskit_hamiltonian_artifacts`; users may also construct `QRCReservoir` directly with native `SparsePauliOp` inputs.
+- Qiskit simulator controls live in `ReservoirSpec.qiskit_kwargs` and become `QRCConfig` fields, so simulator/device choices do not leak into preset or Hamiltonian construction.
 - `pyqres.experiments.common` still contains compatibility helpers for config-driven workflows. The lighter task-agnostic path is `qresreservoir.from_dict` plus `Experiment`.
-- Task presets should live outside this package, for example in `pyqres-tasks`, and should produce generic `Dataset` objects or call the generic reservoir transform API.
+- Task presets should live outside this package, for example in `pyqres-tasks`, and should produce generic `Dataset` objects or call the generic reservoir run API.

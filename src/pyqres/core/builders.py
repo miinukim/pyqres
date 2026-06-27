@@ -88,6 +88,40 @@ def build_hamiltonian_params(spec: ReservoirSpec) -> dict[str, Any]:
     return presets.build_hamiltonian_params(spec)
 
 
+def build_qiskit_hamiltonian_artifacts(spec: ReservoirSpec) -> dict[str, Any]:
+    """Build Qiskit-native Hamiltonian artifacts for PauliEvolutionGate dynamics.
+
+    This is the Qiskit-side equivalent of build_hamiltonian_params: explicit
+    user Hamiltonians and preset-generated Hamiltonians are both normalized to
+    SparsePauliOp artifacts before entering the low-level Qiskit reservoir.
+    """
+
+    try:
+        from qiskit.quantum_info import Operator, SparsePauliOp
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise ImportError("qiskit is required to build Qiskit Hamiltonian artifacts.") from exc
+
+    from pyqres.core.reservoir_params import dense_hamiltonian_matrix
+
+    n_qubits = spec.system_qubits + spec.ancilla_qubits
+
+    def to_sparse_pauli_op(value: Any) -> Any:
+        if value is None:
+            return SparsePauliOp.from_list([("I" * n_qubits, 0.0)])
+        if isinstance(value, SparsePauliOp):
+            return value
+        if hasattr(value, "to_sparse_pauli_op") and callable(value.to_sparse_pauli_op):
+            return value.to_sparse_pauli_op()
+        return SparsePauliOp.from_operator(Operator(dense_hamiltonian_matrix(value)))
+
+    params = build_hamiltonian_params(spec)
+    return {
+        "reservoir_type": "pauli_evolution",
+        "H0_hamiltonian": to_sparse_pauli_op(params["H0_hamiltonian"]),
+        "H1_hamiltonian": to_sparse_pauli_op(params["H1_hamiltonian"]),
+    }
+
+
 def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     """Compile a ReservoirSpec into an executable reservoir."""
 
@@ -153,9 +187,9 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
         )
     if backend_key == "qiskit":
         from pyqres.qiskit import QRCConfig, QRCReservoir
-        from pyqres import presets
 
         circuit_kwargs = dict(spec.circuit_kwargs)
+        qiskit_kwargs_from_spec = dict(spec.qiskit_kwargs)
         if spec.source_kind.lower() == "circuit":
             if "circuit" not in spec.runtime:
                 raise ValueError("Circuit reservoirs require a runtime circuit object.")
@@ -172,12 +206,13 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
                 "reservoir_type": "custom_circuit",
                 "reservoir_circuit": spec.runtime["circuit"],
             }
+            qiskit_kwargs.update(qiskit_kwargs_from_spec)
             qiskit_kwargs.update(circuit_kwargs)
             return QRCReservoir(
                 QRCConfig(**qiskit_kwargs)
             )
 
-        artifacts = presets.build_qiskit_artifacts(spec)
+        artifacts = build_qiskit_hamiltonian_artifacts(spec)
         qiskit_kwargs = {
             "n_system": spec.system_qubits,
             "n_ancilla": spec.ancilla_qubits,
@@ -188,6 +223,7 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
             "shots": int(readout.shots),
         }
         qiskit_kwargs.update(artifacts)
+        qiskit_kwargs.update(qiskit_kwargs_from_spec)
         qiskit_kwargs.update(circuit_kwargs)
         return QRCReservoir(
             QRCConfig(**qiskit_kwargs)
@@ -195,13 +231,13 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     raise ValueError(f"Unsupported backend '{backend}'")
 
 
-def transform(reservoir: Any, inputs: InputSequence) -> np.ndarray:
+def run(reservoir: Any, inputs: InputSequence) -> np.ndarray:
     """Run any pyqres-compatible reservoir on a stream."""
 
-    if hasattr(reservoir, "transform"):
-        return np.asarray(reservoir.transform(inputs), dtype=float)
-    if hasattr(reservoir, "run_stream"):
-        return np.asarray(reservoir.run_stream(inputs), dtype=float)
     if hasattr(reservoir, "run"):
         return np.asarray(reservoir.run(inputs), dtype=float)
+    if hasattr(reservoir, "run_stream"):
+        return np.asarray(reservoir.run_stream(inputs), dtype=float)
+    if hasattr(reservoir, "transform"):
+        return np.asarray(reservoir.transform(inputs), dtype=float)
     raise TypeError("reservoir must expose transform, run_stream, or run")

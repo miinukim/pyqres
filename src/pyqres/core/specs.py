@@ -176,6 +176,7 @@ class ReservoirSpec:
     model_kwargs: Mapping[str, Any] = field(default_factory=dict)
     hamiltonian_kwargs: Mapping[str, Any] = field(default_factory=dict)
     circuit_kwargs: Mapping[str, Any] = field(default_factory=dict)
+    qiskit_kwargs: Mapping[str, Any] = field(default_factory=dict)
     runtime: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def with_updates(self, **updates: Any) -> "ReservoirSpec":
@@ -196,6 +197,7 @@ class ReservoirSpec:
         raw["model_kwargs"] = dict(raw.get("model_kwargs", {}))
         raw["hamiltonian_kwargs"] = dict(raw.get("hamiltonian_kwargs", {}))
         raw["circuit_kwargs"] = dict(raw.get("circuit_kwargs", {}))
+        raw["qiskit_kwargs"] = dict(raw.get("qiskit_kwargs", {}))
         raw["runtime"] = dict(raw.get("runtime", {}))
         if raw.get("preset") is None:
             raw["preset"] = raw.get("family")
@@ -223,6 +225,7 @@ class ReservoirSpec:
             "model_kwargs": dict(self.model_kwargs),
             "hamiltonian_kwargs": dict(self.hamiltonian_kwargs),
             "circuit_kwargs": dict(self.circuit_kwargs),
+            "qiskit_kwargs": dict(self.qiskit_kwargs),
         }
         if self.runtime:
             out["runtime"] = {key: repr(value) for key, value in self.runtime.items()}

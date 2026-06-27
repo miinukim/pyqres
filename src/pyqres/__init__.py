@@ -1,6 +1,6 @@
 """Unified namespace for task-agnostic quantum reservoir computing tools."""
 
-from .core.builders import build_dimension_model, build_hamiltonian_params, compile_reservoir, transform
+from .core.builders import build_dimension_model, build_hamiltonian_params, build_qiskit_hamiltonian_artifacts, compile_reservoir, run
 from .core import (
     BackendLike,
     BatchReservoirProtocol,
@@ -51,10 +51,10 @@ from .core import (
     TaskDatasetFactoryProtocol,
     TaskRunnerProtocol,
     TimeSeriesDataBuilderProtocol,
-    TransformFunctionProtocol,
+    RunFunctionProtocol,
     TransformReservoirProtocol,
 )
-from .core.fluent import qresreservoir
+from .core.factory import qresreservoir
 from .core.specs import DynamicsSpec, InputEncodingSpec, ReadoutSpec, ReservoirSpec
 from . import presets
 from .experiments import data, readout
@@ -125,12 +125,13 @@ __all__ = [
     "TaskDatasetFactoryProtocol",
     "TaskRunnerProtocol",
     "TimeSeriesDataBuilderProtocol",
-    "TransformFunctionProtocol",
+    "RunFunctionProtocol",
     "TransformReservoirProtocol",
     "build_dimension_model",
     "build_hamiltonian_params",
+    "build_qiskit_hamiltonian_artifacts",
     "compile_reservoir",
     "data",
     "readout",
-    "transform",
+    "run",
 ]

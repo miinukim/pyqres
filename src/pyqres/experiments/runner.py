@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 import numpy as np
 
-from pyqres.core.builders import compile_reservoir, transform
+from pyqres.core.builders import compile_reservoir, run
 from pyqres.core.protocols import DatasetProtocol, MetricCallable, ReadoutProtocol
 from pyqres.core.specs import ReservoirSpec
 from pyqres.experiments.metrics import resolve_metrics
@@ -55,7 +55,7 @@ class Experiment:
     def run(self) -> ExperimentResult:
         """Collect features, fit the readout, and score train/test splits."""
 
-        features = transform(self.reservoir, self.dataset.inputs)
+        features = run(self.reservoir, self.dataset.inputs)
         self.dataset.validate_features(features)
         readout = self.readout if self.readout is not None else Ridge()
         metric_fns = resolve_metrics(self.metrics)

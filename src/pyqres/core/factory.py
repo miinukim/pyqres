@@ -178,6 +178,7 @@ def _spec_from_parts(
     runtime: Mapping[str, Any],
     readout: ReadoutSpec,
     model_kwargs: Mapping[str, Any],
+    qiskit_kwargs: Mapping[str, Any],
 ) -> ReservoirSpec:
     dynamics = dynamics or DynamicsSpec(kind="preset", name=preset_name)
     kind = dynamics.kind.lower()
@@ -200,6 +201,7 @@ def _spec_from_parts(
         "dynamics": dynamics,
         "readout": readout,
         "runtime": dict(runtime),
+        "qiskit_kwargs": dict(qiskit_kwargs),
         **updates,
     }
 
@@ -251,6 +253,7 @@ class qresreservoir:
 
         tau = _pop_any(raw, ("tau",), None)
         model_cfg = _as_mapping(_pop_any(raw, ("model_kwargs", "model_params", "model_config"), None), name="model_kwargs")
+        qiskit_cfg = _as_mapping(_pop_any(raw, ("qiskit", "qiskit_kwargs", "simulator"), None), name="qiskit")
         readout = _readout_from_config(_pop_any(raw, ("readout",), None))
 
         if raw:
@@ -266,6 +269,7 @@ class qresreservoir:
             runtime=dynamics_runtime,
             readout=readout,
             model_kwargs=model_cfg,
+            qiskit_kwargs=qiskit_cfg,
         )
         return ReservoirBuilder(spec, _backend=backend_name)
 
