@@ -38,8 +38,9 @@ def make_dataset():
 
 def main() -> None:
     cfg = PrethermalShadowConfig(
+        n_memory=3,
         n_readout=2,
-        floquet=PrethermalFloquetConfig(n_memory=3, n_floquet=2, tau=0.15, seed=23),
+        floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15, seed=23),
         input_write=InputWriteConfig(axis="y", beta=0.08, bias=0.0),
         transducer=TransducerConfig(tau_c=0.04, seed=29),
         shadow=ShadowReadoutConfig(pauli_k=2, shots=12, include_bias=True, seed=31),

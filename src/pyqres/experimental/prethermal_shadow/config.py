@@ -17,7 +17,6 @@ SimulatorDevice = Literal["automatic", "CPU", "GPU"]
 class PrethermalFloquetConfig:
     """Memory-only prethermal Floquet dynamics."""
 
-    n_memory: int
     n_floquet: int = 4
     tau: float = 0.2
     h: Sequence[float] | None = None
@@ -62,6 +61,7 @@ class ShadowReadoutConfig:
 class PrethermalShadowConfig:
     """Full prethermal shadow reservoir configuration."""
 
+    n_memory: int
     n_readout: int
     floquet: PrethermalFloquetConfig
     input_write: InputWriteConfig = field(default_factory=InputWriteConfig)
@@ -146,7 +146,10 @@ def validate_and_resolve_config(cfg: PrethermalShadowConfig) -> ResolvedPretherm
     """Validate a config and materialize seed-controlled defaults."""
 
     if not isinstance(cfg.floquet, PrethermalFloquetConfig):
-        cfg = replace(cfg, floquet=PrethermalFloquetConfig(**dict(cfg.floquet)))  # type: ignore[arg-type]
+        floquet_raw = dict(cfg.floquet)  # type: ignore[arg-type]
+        if "n_memory" in floquet_raw:
+            cfg = replace(cfg, n_memory=int(floquet_raw.pop("n_memory")))
+        cfg = replace(cfg, floquet=PrethermalFloquetConfig(**floquet_raw))
     if not isinstance(cfg.input_write, InputWriteConfig):
         cfg = replace(cfg, input_write=InputWriteConfig(**dict(cfg.input_write)))  # type: ignore[arg-type]
     if cfg.transducer is not None and not isinstance(cfg.transducer, TransducerConfig):
@@ -154,13 +157,13 @@ def validate_and_resolve_config(cfg: PrethermalShadowConfig) -> ResolvedPretherm
     if not isinstance(cfg.shadow, ShadowReadoutConfig):
         cfg = replace(cfg, shadow=ShadowReadoutConfig(**dict(cfg.shadow)))  # type: ignore[arg-type]
 
-    n_memory = int(cfg.floquet.n_memory)
+    n_memory = int(cfg.n_memory)
     n_readout = int(cfg.n_readout)
     n_floquet = int(cfg.floquet.n_floquet)
     shots = int(cfg.shadow.shots)
     pauli_k = int(cfg.shadow.pauli_k)
     if n_memory <= 0:
-        raise ValueError("floquet.n_memory must be positive.")
+        raise ValueError("n_memory must be positive.")
     if n_readout <= 0:
         raise ValueError("n_readout must be positive.")
     if n_floquet <= 0:
@@ -181,8 +184,9 @@ def validate_and_resolve_config(cfg: PrethermalShadowConfig) -> ResolvedPretherm
 
     normalized = replace(
         cfg,
+        n_memory=n_memory,
         n_readout=n_readout,
-        floquet=replace(cfg.floquet, n_memory=n_memory, n_floquet=n_floquet),
+        floquet=replace(cfg.floquet, n_floquet=n_floquet),
         shadow=replace(cfg.shadow, shots=shots, pauli_k=pauli_k, bases=bases),
         aer_options=dict(cfg.aer_options or {}),
     )

@@ -336,6 +336,77 @@ reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
 
+## Experimental Prethermal Shadow Reservoir
+
+The prethermal shadow reservoir is implemented as an experimental standalone
+reservoir object rather than a `qresreservoir.from_dict(...)` backend. This is
+intentional: it has its own circuit schedule, finite-shot execution model, and
+classical-shadow feature reconstruction, while still satisfying the generic
+pyqres reservoir contract:
+
+```python
+run_stream(inputs) -> feature_matrix
+```
+
+The user-facing import path is:
+
+```python
+from pyqres.experimental.prethermal_shadow import (
+    PrethermalShadowConfig,
+    PrethermalShadowReservoir,
+)
+```
+
+The implementation is split by responsibility:
+
+```text
+src/pyqres/experimental/prethermal_shadow/config.py
+src/pyqres/experimental/prethermal_shadow/circuits.py
+src/pyqres/experimental/prethermal_shadow/shadows.py
+src/pyqres/experimental/prethermal_shadow/reservoir.py
+examples/prethermal_shadow_mackey_glass.py
+```
+
+Key runtime semantics:
+
+- Memory qubits are laid out first and persist across the entire input stream.
+- Readout qubits are prepared in `|+>`, coupled to memory when a transducer is
+  configured, randomly rotated into Pauli measurement bases, measured, and reset
+  at every time step.
+- `ShadowReadoutConfig.shots` represents independent random basis schedules.
+  The implementation groups duplicate schedules before Qiskit/Aer execution,
+  but the estimator still treats them as independent shadow samples.
+- Feature labels are all non-identity readout Pauli strings up to
+  `pauli_k`, ordered by weight, qubit tuple, and Pauli product, with optional
+  leading `bias`.
+- `transducer=None` is supported for no-coupling ablations.
+
+The customization surface is deliberately modular:
+
+- Use `circuits.py` helpers when replacing only a circuit block.
+- Use `shadows.py` helpers when changing basis schedules or feature
+  reconstruction.
+- Pass `basis_sampler`, `schedule_executor`, or `feature_builder` to
+  `PrethermalShadowReservoir` for advanced experiments without subclassing.
+
+Example shape:
+
+```python
+cfg = PrethermalShadowConfig(
+    n_memory=3,
+    n_readout=2,
+    floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15),
+    transducer=TransducerConfig(tau_c=0.04),
+    shadow=ShadowReadoutConfig(pauli_k=2, shots=64),
+)
+reservoir = PrethermalShadowReservoir(cfg)
+result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
+```
+
+Keep this implementation experimental until the research interface stabilizes.
+Avoid adding it to `pyqres.__init__` or `compile_reservoir(...)` unless there is
+a clear second use case for dictionary-level construction.
+
 ## Qiskit, MPS, And GPU Simulation
 
 Qiskit-specific code is in:
@@ -465,6 +536,10 @@ reservoir = qres.qresreservoir.from_dict({
 
 The object does not need to inherit from a pyqres base class. It only needs to
 return a finite feature matrix with one row per input sample.
+
+The prethermal shadow reservoir follows this same path. It is a pyqres-compatible
+object because it exposes `run_stream`, `run`, and `transform`, not because it
+inherits from a base class or is registered in the dictionary factory.
 
 ## Adding A Backend
 

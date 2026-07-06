@@ -15,7 +15,8 @@ def small_config(**kwargs):
 
     base = {
         "n_readout": 2,
-        "floquet": PrethermalFloquetConfig(n_memory=2, n_floquet=1, tau=0.1, seed=5),
+        "n_memory": 2,
+        "floquet": PrethermalFloquetConfig(n_floquet=1, tau=0.1, seed=5),
         "input_write": InputWriteConfig(beta=0.05),
         "transducer": TransducerConfig(tau_c=0.02, seed=6),
         "shadow": ShadowReadoutConfig(pauli_k=2, shots=8, seed=7),
@@ -32,7 +33,7 @@ def test_imports_do_not_require_qiskit_execution():
     from pyqres.experimental.prethermal_shadow.shadows import generate_pauli_labels
 
     assert pyqres.Experiment is not None
-    assert PrethermalFloquetConfig(n_memory=1).n_memory == 1
+    assert PrethermalFloquetConfig(n_floquet=1).n_floquet == 1
     assert len(generate_pauli_labels(2, 1)) == 6
 
 
@@ -130,7 +131,8 @@ def test_zero_transducer_with_mock_executor_shape():
     reservoir = PrethermalShadowReservoir(
         PrethermalShadowConfig(
             n_readout=1,
-            floquet=PrethermalFloquetConfig(n_memory=1, n_floquet=1),
+            n_memory=1,
+            floquet=PrethermalFloquetConfig(n_floquet=1),
             transducer=None,
             shadow=ShadowReadoutConfig(pauli_k=1, shots=4),
         ),
@@ -149,8 +151,8 @@ def test_circuit_measures_and_resets_only_readout():
     reservoir = PrethermalShadowReservoir(small_config())
     schedule = np.full((2, 2), "Z", dtype="U1")
     circuit = reservoir.build_streaming_circuit([0.0, 0.1], schedule)
-    memory = set(range(reservoir.cfg.base.floquet.n_memory))
-    readout = set(range(reservoir.cfg.base.floquet.n_memory, reservoir.cfg.base.floquet.n_memory + reservoir.cfg.base.n_readout))
+    memory = set(range(reservoir.cfg.base.n_memory))
+    readout = set(range(reservoir.cfg.base.n_memory, reservoir.cfg.base.n_memory + reservoir.cfg.base.n_readout))
 
     for instruction in circuit.data:
         if instruction.operation.name in {"measure", "reset"}:
@@ -169,7 +171,8 @@ def test_deterministic_aer_execution_and_experiment_smoke(tmp_path):
     cfg = small_config(
         n_readout=1,
         shadow=ShadowReadoutConfig(pauli_k=1, shots=6, seed=17),
-        floquet=PrethermalFloquetConfig(n_memory=1, n_floquet=1, tau=0.05, seed=13),
+        n_memory=1,
+        floquet=PrethermalFloquetConfig(n_floquet=1, tau=0.05, seed=13),
         transducer=None,
         simulator_method="density_matrix",
         seed_simulator=19,

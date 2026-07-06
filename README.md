@@ -304,6 +304,76 @@ dataset = qres.data.arrays(inputs, targets).split(washout=20, train=100, test=50
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge(), metrics=["mse", "r2"]).run()
 ```
 
+## Experimental Prethermal Shadow Reservoir
+
+`pyqres.experimental.prethermal_shadow` provides a standalone experimental
+reservoir that combines prethermal memory dynamics, readout reset/measurement,
+and classical-shadow feature reconstruction. It is intentionally not wired into
+`qres.qresreservoir.from_dict(...)`; instantiate it directly and pass it to
+`qres.Experiment` as a custom reservoir object.
+
+Install the Qiskit optional dependencies first:
+
+```bash
+python -m pip install -e .[qiskit]
+```
+
+Run the small smoke example:
+
+```bash
+python examples/prethermal_shadow_mackey_glass.py
+```
+
+Minimal use:
+
+```python
+import pyqres as qres
+from pyqres.experimental.prethermal_shadow import (
+    InputWriteConfig,
+    PrethermalFloquetConfig,
+    PrethermalShadowConfig,
+    PrethermalShadowReservoir,
+    ShadowReadoutConfig,
+    TransducerConfig,
+)
+
+cfg = PrethermalShadowConfig(
+    n_memory=3,
+    n_readout=2,
+    floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15, seed=23),
+    input_write=InputWriteConfig(axis="y", beta=0.08),
+    transducer=TransducerConfig(tau_c=0.04, seed=29),
+    shadow=ShadowReadoutConfig(pauli_k=2, shots=64, include_bias=True, seed=31),
+    simulator_method="density_matrix",
+    seed_simulator=37,
+)
+
+reservoir = PrethermalShadowReservoir(cfg)
+result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
+print(reservoir.feature_labels)
+```
+
+Important behavior:
+
+- Memory qubits persist across the input stream; readout qubits are measured and
+  reset at every time step.
+- `shadow.shots` means independent random classical-shadow basis schedules.
+  Identical schedules are grouped internally before Aer execution.
+- Missing `h`, `jz`, `jxy`, and transducer `g` are generated from documented
+  seed-controlled random defaults. `x_break` defaults to zeros.
+- `transducer=None` is a valid no-coupling ablation; readout qubits are still
+  prepared, measured, and converted into shadow features.
+- Feature columns are all non-identity readout Pauli strings up to
+  `shadow.pauli_k`, plus an optional `bias` column.
+
+For customization, public helpers live in:
+
+- `pyqres.experimental.prethermal_shadow.circuits`: circuit block builders
+- `pyqres.experimental.prethermal_shadow.shadows`: basis sampling, feature
+  labels, count decoding, and shadow estimators
+- `PrethermalShadowReservoir(..., basis_sampler=..., schedule_executor=..., feature_builder=...)`:
+  hook points for advanced experiments without subclassing
+
 ## Option Reference
 
 ### `qres.qresreservoir.from_dict(config)`
@@ -621,5 +691,7 @@ For most users, these are the modules to import:
 - `pyqres.presets`: named reservoir spec helpers and preset names.
 - `pyqres.qiskit`: direct Qiskit circuit backend control.
 - `pyqres.simulation`: dense exact and trajectory backends.
+- `pyqres.experimental.prethermal_shadow`: experimental prethermal
+  classical-shadow reservoir.
 - `pyqres.dim`: PTM, Volterra, visibility, and dimension-analysis tools.
 - `pyqres.baselines`: ESN and logistic/softmax classical baselines.

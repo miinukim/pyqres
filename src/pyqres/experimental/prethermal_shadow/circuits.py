@@ -105,7 +105,7 @@ def build_streaming_circuit(inputs: Sequence[float] | np.ndarray, basis_schedule
     require_qiskit()
     values = np.asarray(inputs, dtype=float).reshape(-1)
     schedule = np.asarray(basis_schedule, dtype="U1")
-    n_memory = int(cfg.base.floquet.n_memory)
+    n_memory = int(cfg.base.n_memory)
     n_readout = int(cfg.base.n_readout)
     if schedule.shape != (values.shape[0], n_readout):
         raise ValueError(f"basis_schedule must have shape {(values.shape[0], n_readout)}, got {schedule.shape}.")
