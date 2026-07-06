@@ -77,6 +77,9 @@ Install benchmark task presets separately:
 python -m pip install -e ../pyqres-tasks
 ```
 
+For a developer-oriented walkthrough of how the package fits together, see
+[`docs/user_guide.md`](docs/user_guide.md).
+
 ## Reservoir Dictionaries
 
 `qres.qresreservoir.from_dict({...})` is the recommended construction API. It accepts a plain dictionary and returns a compiled reservoir.

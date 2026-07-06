@@ -13,6 +13,6 @@ dist/
 venv/
 outputs/
 docs/*
-!docs/code_structure.md
+!docs/user_guide.md
 !docs/volterra_numerical_methods.md
 *.log
