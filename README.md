@@ -329,9 +329,7 @@ Minimal use:
 ```python
 import pyqres as qres
 from pyqres.experimental.prethermal_shadow import (
-    FastDriveConfig,
     InputWriteConfig,
-    PrethermalFloquetConfig,
     PrethermalShadowConfig,
     PrethermalShadowReservoir,
     ShadowReadoutConfig,
@@ -341,16 +339,6 @@ from pyqres.experimental.prethermal_shadow import (
 cfg = PrethermalShadowConfig(
     n_memory=3,
     n_readout=2,
-    floquet=PrethermalFloquetConfig(
-        mode="fast_drive",
-        fast_drive=FastDriveConfig(
-            omega=18.0,
-            n_cycles_per_input=2,
-            drive_amplitude=0.8,
-            drive_seed=41,
-        ),
-        seed=23,
-    ),
     input_write=InputWriteConfig(axis="y", beta=0.08),
     transducer=TransducerConfig(tau_c=0.04, seed=29),
     shadow=ShadowReadoutConfig(pauli_k=2, shots=64, include_bias=True, seed=31),
@@ -367,11 +355,11 @@ Important behavior:
 
 - Memory qubits persist across the input stream; readout qubits are measured and
   reset at every time step.
-- In the default `mode="fast_drive"` path, the memory block is an explicit
-  binary high-frequency drive with period `2*pi/omega`, repeated
-  `fast_drive.n_cycles_per_input` times per input. Readout qubits do not
-  participate in this drive. The older `n_floquet/tau` effective-static path is
-  still available with `PrethermalFloquetConfig(mode="effective_static", ...)`.
+- The default memory block is an explicit binary high-frequency fast drive with
+  period `2*pi/omega`, repeated `fast_drive.n_cycles_per_input` times per
+  input. Readout qubits do not participate in this drive. The older
+  `n_floquet/tau` effective-static path is available only as an explicit legacy
+  escape hatch with `PrethermalFloquetConfig(mode="effective_static", ...)`.
 - `shadow.shots` means independent random classical-shadow basis schedules.
   Identical schedules are grouped internally before Aer execution.
 - Missing `h`, `jz`, `jxy`, drive coefficients, and transducer `g` are

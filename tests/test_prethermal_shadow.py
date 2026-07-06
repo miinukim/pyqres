@@ -50,6 +50,19 @@ def test_feature_label_count():
     assert labels[:4] == ["bias", "X0", "Y0", "Z0"]
 
 
+def test_shadow_config_defaults_to_fast_drive_without_floquet_block():
+    from pyqres.experimental.prethermal_shadow import PrethermalShadowConfig
+    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
+
+    resolved = validate_and_resolve_config(PrethermalShadowConfig(n_memory=2, n_readout=2))
+    assert resolved.base.floquet.mode == "fast_drive"
+    assert np.isclose(resolved.fast_drive_period, 2.0 * np.pi / resolved.base.floquet.fast_drive.omega)
+    assert np.isclose(
+        resolved.reservoir_dt,
+        resolved.base.floquet.fast_drive.n_cycles_per_input * resolved.fast_drive_period,
+    )
+
+
 def test_snapshot_estimator_known_values():
     from pyqres.experimental.prethermal_shadow.shadows import estimate_shadow_features, generate_pauli_labels
 

@@ -39,7 +39,6 @@ def default_config() -> PrethermalShadowConfig:
         n_memory=3,
         n_readout=2,
         floquet=PrethermalFloquetConfig(
-            mode="fast_drive",
             fast_drive=FastDriveConfig(
                 omega=16.0,
                 n_cycles_per_input=2,

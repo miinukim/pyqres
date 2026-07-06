@@ -42,7 +42,6 @@ def main() -> None:
         n_memory=3,
         n_readout=2,
         floquet=PrethermalFloquetConfig(
-            mode="fast_drive",
             fast_drive=FastDriveConfig(omega=18.0, n_cycles_per_input=2, drive_amplitude=0.8, drive_seed=41),
             seed=23,
         ),

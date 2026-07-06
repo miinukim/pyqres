@@ -88,7 +88,7 @@ class PrethermalShadowConfig:
 
     n_memory: int
     n_readout: int
-    floquet: PrethermalFloquetConfig
+    floquet: PrethermalFloquetConfig = field(default_factory=PrethermalFloquetConfig)
     input_write: InputWriteConfig = field(default_factory=InputWriteConfig)
     transducer: TransducerConfig | None = None
     shadow: ShadowReadoutConfig = field(default_factory=ShadowReadoutConfig)
