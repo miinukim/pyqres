@@ -223,6 +223,87 @@ python -m pyqres.experiments.cli experiment.yaml
 
 The same structure can be submitted directly as a Python dictionary to `pyqres.experiments.run_experiment_from_config(...)`.
 
+## Custom Reservoir, Input, And Measurement Control
+
+The dictionary API is the recommended path for ordinary preset, Hamiltonian,
+Qiskit-circuit, and custom-object reservoirs. For lower-level dense simulation
+experiments that need non-Hamiltonian input encoding or custom measurement
+control, build the simulation reservoir directly and pass it to
+`qres.Experiment`.
+
+See the runnable example:
+
+```bash
+python examples/custom_reservoir_input_measurement.py
+```
+
+That example demonstrates a non-preset setup:
+
+- explicit Pauli-term reservoir dynamics through `ReservoirParams.from_pauli_terms`
+- amplitude input encoding on the ancilla register
+- weak ancilla measurement
+- measurement-conditioned feedback through `MeasurementControlConfig`
+- the same generic `qres.Experiment(...)` readout and metrics flow
+
+The core distinction is:
+
+- `input_encoding="hamiltonian"` uses `H(u) = H0 + input_scale * u * H1`.
+- `input_encoding="amplitude"` or `input_encoding="unitary"` uses `H0` as the
+  fixed reservoir dynamics and applies an input-dependent encoding unitary.
+  In those modes, `H1` is not part of the input map.
+
+Minimal shape:
+
+```python
+import numpy as np
+
+import pyqres as qres
+from pyqres.core.control import MeasurementControlConfig
+from pyqres.core.reservoir_params import ReservoirParams
+from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
+
+hamiltonian = ReservoirParams.from_pauli_terms(
+    n_system=1,
+    n_ancilla=1,
+    h0_terms=[
+        (0.45, ((0, "X"),)),
+        (0.20, ((1, "X"),)),
+        (0.70, ((0, "Z"), (1, "Z"))),
+    ],
+    h1_terms=[],
+    tau=0.8,
+).generate()
+
+control = MeasurementControlConfig(
+    measurement_mode="weak",
+    measurement_strength=0.65,
+    post_measurement_mode="reset",
+    conditioned_gate="system_rz",
+    conditioned_gate_angle=0.25 * np.pi,
+    conditioned_gate_target=0,
+)
+
+reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(
+    n_system=1,
+    n_ancilla=1,
+    tau=hamiltonian["tau"],
+    H0_hamiltonian=hamiltonian["H0_hamiltonian"],
+    H1_hamiltonian=hamiltonian["H1_hamiltonian"],
+    input_encoding="amplitude",
+    input_scale=0.5,
+    input_bias=0.5,
+    encoding_register="ancilla",
+    encoding_targets=(0,),
+    amplitude_encoding_style="sqrt_u_sqrt_1_minus_u",
+    include_bias=True,
+    init_state="zero",
+    control=control,
+))
+
+dataset = qres.data.arrays(inputs, targets).split(washout=20, train=100, test=50)
+result = qres.Experiment(reservoir, dataset, readout=qres.Ridge(), metrics=["mse", "r2"]).run()
+```
+
 ## Option Reference
 
 ### `qres.qresreservoir.from_dict(config)`

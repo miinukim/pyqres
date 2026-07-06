@@ -256,6 +256,86 @@ Backend choice determines the runtime behavior, not the user task. The same
 Mackey-Glass dataset can be used with a dense reservoir, a Qiskit reservoir, or
 a custom Python reservoir.
 
+## Custom Input Encoding And Measurement Control
+
+The high-level dictionary API is intentionally centered on portable reservoir
+construction: presets, explicit Hamiltonians, raw Qiskit circuits, and existing
+reservoir objects. Some dense-simulation controls are lower-level because they
+are specific to the exact simulation backend.
+
+Use direct simulation config classes when you need to customize:
+
+- input encoding mode: `hamiltonian`, `amplitude`, or `unitary`
+- input target register: `system`, `ancilla`, or `full`
+- amplitude state preparation or a custom input-unitary factory
+- projective versus weak ancilla measurement
+- post-measurement reset versus keep behavior
+- measurement-conditioned feedback gates
+
+The relevant files are:
+
+```text
+src/pyqres/simulation/exact_qrc.py
+src/pyqres/simulation/channel_map.py
+src/pyqres/core/control.py
+src/pyqres/core/reservoir_params.py
+examples/custom_reservoir_input_measurement.py
+```
+
+The important semantic split is:
+
+```text
+input_encoding="hamiltonian":
+    U(u) = exp(-i tau (H0 + input_scale * u * H1))
+
+input_encoding="amplitude" or "unitary":
+    U(u) = exp(-i tau H0) composed with an input-dependent encoding unitary
+```
+
+So `H1` controls the input only in Hamiltonian-modulation mode. For amplitude
+or unitary input encoding, `H0` supplies the fixed reservoir dynamics and the
+input enters through the configured encoding unitary.
+
+The direct dense-simulation path still composes with the generic experiment
+API:
+
+```python
+from pyqres.core.control import MeasurementControlConfig
+from pyqres.core.reservoir_params import ReservoirParams
+from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
+
+hamiltonian = ReservoirParams.from_pauli_terms(
+    n_system=1,
+    n_ancilla=1,
+    h0_terms=[(0.45, ((0, "X"),)), (0.70, ((0, "Z"), (1, "Z")))],
+    h1_terms=[],
+    tau=0.8,
+).generate()
+
+control = MeasurementControlConfig(
+    measurement_mode="weak",
+    measurement_strength=0.65,
+    post_measurement_mode="reset",
+    conditioned_gate="system_rz",
+)
+
+reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(
+    n_system=1,
+    n_ancilla=1,
+    tau=hamiltonian["tau"],
+    H0_hamiltonian=hamiltonian["H0_hamiltonian"],
+    H1_hamiltonian=hamiltonian["H1_hamiltonian"],
+    input_encoding="amplitude",
+    input_scale=0.5,
+    input_bias=0.5,
+    encoding_register="ancilla",
+    encoding_targets=(0,),
+    control=control,
+))
+
+result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
+```
+
 ## Qiskit, MPS, And GPU Simulation
 
 Qiskit-specific code is in:
