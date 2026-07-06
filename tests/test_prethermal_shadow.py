@@ -6,6 +6,7 @@ import pytest
 
 def small_config(**kwargs):
     from pyqres.experimental.prethermal_shadow import (
+        FastDriveConfig,
         InputWriteConfig,
         PrethermalFloquetConfig,
         PrethermalShadowConfig,
@@ -16,7 +17,11 @@ def small_config(**kwargs):
     base = {
         "n_readout": 2,
         "n_memory": 2,
-        "floquet": PrethermalFloquetConfig(n_floquet=1, tau=0.1, seed=5),
+        "floquet": PrethermalFloquetConfig(
+            mode="fast_drive",
+            fast_drive=FastDriveConfig(omega=12.0, n_cycles_per_input=1, drive_amplitude=0.5, drive_seed=8),
+            seed=5,
+        ),
         "input_write": InputWriteConfig(beta=0.05),
         "transducer": TransducerConfig(tau_c=0.02, seed=6),
         "shadow": ShadowReadoutConfig(pauli_k=2, shots=8, seed=7),
@@ -159,6 +164,81 @@ def test_circuit_measures_and_resets_only_readout():
             touched = {circuit.find_bit(qubit).index for qubit in instruction.qubits}
             assert touched <= readout
             assert not touched & memory
+
+
+def test_fast_drive_timing_uses_omega_and_cycles():
+    from pyqres.experimental.prethermal_shadow import FastDriveConfig, PrethermalFloquetConfig, ShadowReadoutConfig
+    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
+
+    cfg = small_config(
+        floquet=PrethermalFloquetConfig(
+            mode="fast_drive",
+            fast_drive=FastDriveConfig(omega=10.0, n_cycles_per_input=3),
+            tau=999.0,
+            n_floquet=99,
+        )
+    )
+    resolved = validate_and_resolve_config(cfg)
+    assert np.isclose(resolved.fast_drive_period, 2.0 * np.pi / 10.0)
+    assert np.isclose(resolved.reservoir_dt, 3.0 * 2.0 * np.pi / 10.0)
+
+
+def test_fast_drive_circuit_block_touches_memory_only():
+    pytest.importorskip("qiskit")
+
+    from qiskit import QuantumCircuit
+
+    from pyqres.experimental.prethermal_shadow.circuits import append_memory_step
+    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
+
+    resolved = validate_and_resolve_config(small_config(n_memory=2, n_readout=2))
+    circuit = QuantumCircuit(4)
+    append_memory_step(circuit, (0, 1), resolved)
+    for instruction in circuit.data:
+        touched = {circuit.find_bit(qubit).index for qubit in instruction.qubits}
+        assert touched <= {0, 1}
+
+
+def test_fast_drive_dense_and_circuit_order_match_small_commuting_case():
+    pytest.importorskip("qiskit")
+
+    from qiskit import QuantumCircuit
+    from qiskit.quantum_info import Operator
+
+    from pyqres.experimental.prethermal_shadow import FastDriveConfig, PrethermalFloquetConfig, ShadowReadoutConfig
+    from pyqres.experimental.prethermal_shadow.circuits import append_fast_drive_period
+    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
+    from pyqres.experimental.prethermal_shadow.dynamics import build_fast_drive_period_unitary
+
+    cfg = small_config(
+        n_memory=1,
+        n_readout=1,
+        shadow=ShadowReadoutConfig(pauli_k=1, shots=8, seed=7),
+        floquet=PrethermalFloquetConfig(
+            mode="fast_drive",
+            fast_drive=FastDriveConfig(
+                omega=7.0,
+                n_cycles_per_input=1,
+                drive_amplitude=0.3,
+                drive_axis="z",
+                drive_pattern="global",
+            ),
+            h=[0.9],
+            x_break=[0.0],
+            seed=3,
+        ),
+    )
+    resolved = validate_and_resolve_config(cfg)
+    circuit = QuantumCircuit(1)
+    append_fast_drive_period(circuit, (0,), resolved)
+    assert np.allclose(np.asarray(Operator(circuit).data), build_fast_drive_period_unitary(resolved), atol=1e-10)
+
+
+def test_fast_drive_diagnostics_reject_maximally_mixed_initial_state():
+    from pyqres.experimental.prethermal_shadow.diagnostics import initial_memory_state
+
+    with pytest.raises(ValueError, match="maximally mixed"):
+        initial_memory_state(2, kind="maximally_mixed")
 
 
 def test_deterministic_aer_execution_and_experiment_smoke(tmp_path):

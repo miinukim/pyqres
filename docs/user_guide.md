@@ -392,16 +392,33 @@ The customization surface is deliberately modular:
 Example shape:
 
 ```python
+from pyqres.experimental.prethermal_shadow import FastDriveConfig
+
 cfg = PrethermalShadowConfig(
     n_memory=3,
     n_readout=2,
-    floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15),
+    floquet=PrethermalFloquetConfig(
+        mode="fast_drive",
+        fast_drive=FastDriveConfig(omega=18.0, n_cycles_per_input=2, drive_amplitude=0.8),
+    ),
     transducer=TransducerConfig(tau_c=0.04),
     shadow=ShadowReadoutConfig(pauli_k=2, shots=64),
 )
 reservoir = PrethermalShadowReservoir(cfg)
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
+
+In `mode="fast_drive"`, `omega` and `n_cycles_per_input` define the memory
+evolution interval: the fast period is `2*pi/omega`, and the reservoir step
+duration is `n_cycles_per_input * 2*pi/omega`. Readout qubits are reset to
+`|+>` before each input step and are excluded from the fast drive; they only
+couple through the optional transducer. Use
+`PrethermalFloquetConfig(mode="effective_static", n_floquet=..., tau=...)` for
+the legacy repeated static block.
+
+Run `python examples/diagnose_fast_drive_prethermal.py` before larger task
+benchmarks to inspect memory survival versus `omega`, projected local spectra,
+transducer sensitivity, and finite-shot shadow reconstruction behavior.
 
 Keep this implementation experimental until the research interface stabilizes.
 Avoid adding it to `pyqres.__init__` or `compile_reservoir(...)` unless there is

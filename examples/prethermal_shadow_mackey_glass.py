@@ -15,6 +15,7 @@ import numpy as np
 
 import pyqres as qres
 from pyqres.experimental.prethermal_shadow import (
+    FastDriveConfig,
     InputWriteConfig,
     PrethermalFloquetConfig,
     PrethermalShadowConfig,
@@ -40,7 +41,11 @@ def main() -> None:
     cfg = PrethermalShadowConfig(
         n_memory=3,
         n_readout=2,
-        floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15, seed=23),
+        floquet=PrethermalFloquetConfig(
+            mode="fast_drive",
+            fast_drive=FastDriveConfig(omega=18.0, n_cycles_per_input=2, drive_amplitude=0.8, drive_seed=41),
+            seed=23,
+        ),
         input_write=InputWriteConfig(axis="y", beta=0.08, bias=0.0),
         transducer=TransducerConfig(tau_c=0.04, seed=29),
         shadow=ShadowReadoutConfig(pauli_k=2, shots=12, include_bias=True, seed=31),

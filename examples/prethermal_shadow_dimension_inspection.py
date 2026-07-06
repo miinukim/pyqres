@@ -33,6 +33,7 @@ from pyqres.dim.analysis import DenseVolterraAnalyzer, PTMAffineExpansion, Volte
 from pyqres.dim.isotropy import compressed_visibility_diagnostics
 from pyqres.dim.model import ReservoirBase
 from pyqres.experimental.prethermal_shadow import (
+    FastDriveConfig,
     InputWriteConfig,
     PrethermalFloquetConfig,
     PrethermalShadowConfig,
@@ -83,7 +84,11 @@ def default_config() -> PrethermalShadowConfig:
     return PrethermalShadowConfig(
         n_memory=2,
         n_readout=1,
-        floquet=PrethermalFloquetConfig(n_floquet=2, tau=0.15, seed=23),
+        floquet=PrethermalFloquetConfig(
+            mode="fast_drive",
+            fast_drive=FastDriveConfig(omega=16.0, n_cycles_per_input=2, drive_amplitude=0.8, drive_seed=41),
+            seed=23,
+        ),
         input_write=InputWriteConfig(axis="y", beta=0.08, bias=0.0),
         transducer=TransducerConfig(tau_c=0.04, seed=29),
         shadow=ShadowReadoutConfig(pauli_k=1, shots=256, include_bias=True, seed=31),
@@ -223,8 +228,13 @@ def setup_summary(model: PrethermalExactProxyModel) -> dict[str, object]:
         "n_memory": model.n_memory,
         "n_readout": model.n_readout,
         "dim_memory": model.dim_memory,
+        "floquet_mode": cfg.floquet.mode,
         "n_floquet": cfg.floquet.n_floquet,
         "floquet_tau": cfg.floquet.tau,
+        "fast_drive_omega": cfg.floquet.fast_drive.omega,
+        "fast_drive_cycles_per_input": cfg.floquet.fast_drive.n_cycles_per_input,
+        "fast_drive_period": model.resolved.fast_drive_period,
+        "reservoir_dt": model.resolved.reservoir_dt,
         "input_axis": cfg.input_write.axis,
         "input_beta": cfg.input_write.beta,
         "tau_c": cfg.transducer.tau_c if cfg.transducer else None,
