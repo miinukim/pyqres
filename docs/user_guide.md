@@ -336,13 +336,12 @@ reservoir = ChannelMapReservoir(ChannelMapReservoirConfig(
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
 
-## Experimental Prethermal Shadow Reservoir
+## Prethermal Shadow Reservoir
 
-The prethermal shadow reservoir is implemented as an experimental standalone
-reservoir object rather than a `qresreservoir.from_dict(...)` backend. This is
-intentional: it has its own circuit schedule, finite-shot execution model, and
-classical-shadow feature reconstruction, while still satisfying the generic
-pyqres reservoir contract:
+The prethermal shadow reservoir is implemented as a main-package reservoir
+object. It has its own dense global-Floquet dynamics, trace/reset memory
+channel, and partial-shadow feature reconstruction, while still satisfying the
+generic pyqres reservoir contract:
 
 ```python
 run_stream(inputs) -> feature_matrix
@@ -351,74 +350,63 @@ run_stream(inputs) -> feature_matrix
 The user-facing import path is:
 
 ```python
-from pyqres.experimental.prethermal_shadow import (
-    PrethermalShadowConfig,
-    PrethermalShadowReservoir,
+from pyqres.prethermal_shadow import (
+    GlobalFloquetConfig,
+    GlobalFloquetPartialShadowReservoir,
+    InputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
 )
 ```
 
 The implementation is split by responsibility:
 
 ```text
-src/pyqres/experimental/prethermal_shadow/config.py
-src/pyqres/experimental/prethermal_shadow/circuits.py
-src/pyqres/experimental/prethermal_shadow/shadows.py
-src/pyqres/experimental/prethermal_shadow/reservoir.py
-examples/prethermal_shadow_mackey_glass.py
+src/pyqres/prethermal_shadow/config.py
+src/pyqres/prethermal_shadow/dynamics.py
+src/pyqres/prethermal_shadow/shadows.py
+src/pyqres/prethermal_shadow/reservoir.py
+src/pyqres/prethermal_shadow/diagnostics.py
 ```
 
 Key runtime semantics:
 
 - Memory qubits are laid out first and persist across the entire input stream.
-- Readout qubits are prepared in `|+>`, coupled to memory when a transducer is
-  configured, randomly rotated into Pauli measurement bases, measured, and reset
-  at every time step.
-- `ShadowReadoutConfig.shots` represents independent random basis schedules.
-  The implementation groups duplicate schedules before Qiskit/Aer execution,
-  but the estimator still treats them as independent shadow samples.
-- Feature labels are all non-identity readout Pauli strings up to
-  `pauli_k`, ordered by weight, qubit tuple, and Pauli product, with optional
-  leading `bias`.
-- `transducer=None` is supported for no-coupling ablations.
+- Readout qubits are the trailing subset. The global Floquet Hamiltonian acts
+  on memory and readout qubits together; there is no explicit transducer block.
+- Features are computed from the pre-reset readout marginal, either as exact
+  Pauli expectations or as projective/weak local Pauli shadow estimates.
+- After feature extraction, readout is traced out and reset to `zero` or `plus`
+  for the next step. The default reset state is `zero`.
+- Feature labels are all non-identity readout Pauli strings up to `pauli_k`,
+  with optional leading `bias`.
 
 The customization surface is deliberately modular:
 
-- Use `circuits.py` helpers when replacing only a circuit block.
-- Use `shadows.py` helpers when changing basis schedules or feature
+- Use `dynamics.py` helpers for dense Hamiltonian/unitary construction and
+  partial traces.
+- Use `shadows.py` helpers for projective and weak partial-shadow feature
   reconstruction.
-- Pass `basis_sampler`, `schedule_executor`, or `feature_builder` to
-  `PrethermalShadowReservoir` for advanced experiments without subclassing.
+- Use `diagnostics.py` helpers for projected memory-channel spectra and
+  empirical OVD estimates.
 
 Example shape:
 
 ```python
-cfg = PrethermalShadowConfig(
-    n_memory=3,
-    n_readout=2,
-    transducer=TransducerConfig(tau_c=0.04),
-    shadow=ShadowReadoutConfig(pauli_k=2, shots=64),
+reservoir = GlobalFloquetPartialShadowReservoir(
+    GlobalFloquetConfig(n_qubits=6, n_memory=4, n_readout=2, omega=12.0, n_cycles_per_step=4),
+    InputEncodingConfig(input_qubits="memory", axis="y", beta=0.12),
+    PartialShadowReadoutConfig(pauli_k=2, shots=2048, measurement_type="weak", weak_strength=0.5),
+    ReadoutResetConfig(reset_state="zero"),
 )
-reservoir = PrethermalShadowReservoir(cfg)
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
 
-Fast drive is part of the default reservoir. `PrethermalShadowConfig` creates a
-default `PrethermalFloquetConfig` when `floquet` is omitted; its `omega` and
-`n_cycles_per_input` define the memory evolution interval. The fast period is
-`2*pi/omega`, and the reservoir step duration is
-`n_cycles_per_input * 2*pi/omega`. Readout qubits are reset to `|+>` before
-each input step and are excluded from the fast drive; they only couple through
-the optional transducer. Use
-`PrethermalFloquetConfig(mode="effective_static", n_floquet=..., tau=...)` only
-for the legacy repeated static block.
+For two readout qubits and `pauli_k=2`, the feature count is
+`bias + 3*2 + 9 = 16` when `include_bias=True`.
 
-Run `python examples/diagnose_fast_drive_prethermal.py` before larger task
-benchmarks to inspect memory survival versus `omega`, projected local spectra,
-transducer sensitivity, and finite-shot shadow reconstruction behavior.
-
-Keep this implementation experimental until the research interface stabilizes.
-Avoid adding it to `pyqres.__init__` or `compile_reservoir(...)` unless there is
-a clear second use case for dictionary-level construction.
+The same core classes are also exported from the top-level `pyqres` namespace
+for convenience, for example `pyqres.GlobalFloquetPartialShadowReservoir`.
 
 ## Qiskit, MPS, And GPU Simulation
 

@@ -61,6 +61,14 @@ from .experiments import data, readout
 from .experiments.datasets import Dataset, DatasetSplit
 from .experiments.readout import Ridge
 from .experiments.runner import Experiment, ExperimentResult, Sweep, SweepResult
+from .prethermal_shadow import (
+    GlobalFloquetConfig,
+    InputEncodingConfig as GlobalFloquetInputEncodingConfig,
+    GlobalFloquetPartialShadowReservoir,
+    InputEncodingConfig as PrethermalInputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
+)
 
 __all__ = [
     "BackendLike",
@@ -83,6 +91,9 @@ __all__ = [
     "ExperimentProtocol",
     "ExperimentResult",
     "FeatureMatrix",
+    "GlobalFloquetConfig",
+    "GlobalFloquetInputEncodingConfig",
+    "GlobalFloquetPartialShadowReservoir",
     "HamiltonianLike",
     "HamiltonianSpecProtocol",
     "IndexSequence",
@@ -93,6 +104,8 @@ __all__ = [
     "MetricCallable",
     "ObservableSpec",
     "PauliTermLike",
+    "PartialShadowReadoutConfig",
+    "PrethermalInputEncodingConfig",
     "PresetRegistryProtocol",
     "QRCReservoirProtocol",
     "QiskitArtifactMap",
@@ -100,6 +113,7 @@ __all__ = [
     "QuantumCircuitProtocol",
     "ReadoutSpecProtocol",
     "ReadoutProtocol",
+    "ReadoutResetConfig",
     "ReadoutSpec",
     "ReservoirRunResult",
     "ReservoirSpec",

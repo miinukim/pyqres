@@ -304,19 +304,13 @@ dataset = qres.data.arrays(inputs, targets).split(washout=20, train=100, test=50
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge(), metrics=["mse", "r2"]).run()
 ```
 
-## Experimental Prethermal Shadow Reservoir
+## Prethermal Shadow Reservoir
 
-`pyqres.experimental.prethermal_shadow` provides a standalone experimental
-reservoir that combines prethermal memory dynamics, readout reset/measurement,
-and classical-shadow feature reconstruction. It is intentionally not wired into
-`qres.qresreservoir.from_dict(...)`; instantiate it directly and pass it to
-`qres.Experiment` as a custom reservoir object.
-
-Install the Qiskit optional dependencies first:
-
-```bash
-python -m pip install -e .[qiskit]
-```
+`pyqres.prethermal_shadow` provides a main-package reservoir for all-qubit
+fast-driven Floquet dynamics with partial local classical-shadow readout on a
+readout subset. Instantiate it directly and pass it to `qres.Experiment` as a
+custom reservoir object. The current implementation uses dense density matrices
+and does not require Qiskit.
 
 Run the small smoke example:
 
@@ -328,62 +322,73 @@ Minimal use:
 
 ```python
 import pyqres as qres
-from pyqres.experimental.prethermal_shadow import (
-    InputWriteConfig,
-    PrethermalShadowConfig,
-    PrethermalShadowReservoir,
-    ShadowReadoutConfig,
-    TransducerConfig,
+from pyqres.prethermal_shadow import (
+    GlobalFloquetConfig,
+    GlobalFloquetPartialShadowReservoir,
+    InputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
 )
 
-cfg = PrethermalShadowConfig(
-    n_memory=3,
-    n_readout=2,
-    input_write=InputWriteConfig(axis="y", beta=0.08),
-    transducer=TransducerConfig(tau_c=0.04, seed=29),
-    shadow=ShadowReadoutConfig(pauli_k=2, shots=64, include_bias=True, seed=31),
-    simulator_method="density_matrix",
-    seed_simulator=37,
+reservoir = GlobalFloquetPartialShadowReservoir(
+    GlobalFloquetConfig(
+        n_qubits=6,
+        n_memory=4,
+        n_readout=2,
+        omega=12.0,
+        n_cycles_per_step=4,
+        seed=0,
+    ),
+    InputEncodingConfig(input_qubits="memory", axis="y", beta=0.12, seed=1),
+    PartialShadowReadoutConfig(
+        pauli_k=2,
+        shots=2048,
+        measurement_type="weak",
+        weak_strength=0.5,
+        include_bias=True,
+        seed=2,
+    ),
+    ReadoutResetConfig(reset_state="zero"),
+    seed_simulator=3,
 )
 
-reservoir = PrethermalShadowReservoir(cfg)
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
-print(reservoir.feature_labels)
+print(reservoir.get_feature_names())
+```
+
+Minimal shape check for two readout qubits and `pauli_k=2`:
+
+```python
+res = GlobalFloquetPartialShadowReservoir(
+    GlobalFloquetConfig(n_qubits=6, n_memory=4, n_readout=2, omega=12.0, n_cycles_per_step=4),
+    InputEncodingConfig(),
+    PartialShadowReadoutConfig(pauli_k=2, include_bias=True),
+    ReadoutResetConfig(),
+)
+X = res.run(inputs)
+assert X.shape[1] == 1 + (3 * 2 + 9)
 ```
 
 Important behavior:
 
-- Memory qubits persist across the input stream; readout qubits are measured and
-  reset at every time step.
-- The default memory block is an explicit binary high-frequency fast drive with
-  period `2*pi/omega`, repeated `fast_drive.n_cycles_per_input` times per
-  input. Readout qubits do not participate in this drive. The older
-  `n_floquet/tau` effective-static path is available only as an explicit legacy
-  escape hatch with `PrethermalFloquetConfig(mode="effective_static", ...)`.
-- `shadow.shots` means independent random classical-shadow basis schedules.
-  Identical schedules are grouped internally before Aer execution.
-- Missing `h`, `jz`, `jxy`, drive coefficients, and transducer `g` are
-  generated from documented seed-controlled random defaults. In fast-drive mode,
-  missing `x_break` is sampled from `[-x_break_scale, x_break_scale]`; in
-  effective-static mode it defaults to zeros.
-- `transducer=None` is a valid no-coupling ablation; readout qubits are still
-  prepared, measured, and converted into shadow features.
-- Feature columns are all non-identity readout Pauli strings up to
-  `shadow.pauli_k`, plus an optional `bias` column.
-
-Before task benchmarking, run the fast-drive diagnostics:
-
-```bash
-python examples/diagnose_fast_drive_prethermal.py
-```
+- Memory qubits are laid out first; readout qubits are the trailing subset.
+- The global Floquet Hamiltonian acts on all `n_memory + n_readout` qubits,
+  including readout qubits. There is no explicit transducer block.
+- Features are exact readout Pauli expectations or projective/weak local
+  partial-shadow estimates on the readout marginal.
+- After features are computed, readout is traced out and reset to `|0...0>` by
+  default for the next step.
+- Feature columns are all non-identity readout Pauli strings up to `pauli_k`,
+  plus an optional `bias` column.
 
 For customization, public helpers live in:
 
-- `pyqres.experimental.prethermal_shadow.circuits`: circuit block builders
-- `pyqres.experimental.prethermal_shadow.shadows`: basis sampling, feature
-  labels, count decoding, and shadow estimators
-- `PrethermalShadowReservoir(..., basis_sampler=..., schedule_executor=..., feature_builder=...)`:
-  hook points for advanced experiments without subclassing
+- `pyqres.prethermal_shadow.dynamics`: dense Hamiltonians,
+  Floquet unitaries, partial traces, and reset states
+- `pyqres.prethermal_shadow.shadows`: classical-shadow and partial
+  weak-shadow feature helpers
+- `pyqres.prethermal_shadow.diagnostics`: projected memory-channel
+  spectrum summaries and empirical OVD helpers
 
 ## Option Reference
 
@@ -702,7 +707,6 @@ For most users, these are the modules to import:
 - `pyqres.presets`: named reservoir spec helpers and preset names.
 - `pyqres.qiskit`: direct Qiskit circuit backend control.
 - `pyqres.simulation`: dense exact and trajectory backends.
-- `pyqres.experimental.prethermal_shadow`: experimental prethermal
-  classical-shadow reservoir.
+- `pyqres.prethermal_shadow`: global-Floquet partial classical-shadow reservoir.
 - `pyqres.dim`: PTM, Volterra, visibility, and dimension-analysis tools.
 - `pyqres.baselines`: ESN and logistic/softmax classical baselines.

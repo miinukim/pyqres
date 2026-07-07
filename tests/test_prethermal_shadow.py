@@ -1,285 +1,174 @@
 from __future__ import annotations
 
+from itertools import product
+
 import numpy as np
 import pytest
 
 
-def small_config(**kwargs):
-    from pyqres.experimental.prethermal_shadow import (
-        FastDriveConfig,
-        InputWriteConfig,
-        PrethermalFloquetConfig,
-        PrethermalShadowConfig,
-        ShadowReadoutConfig,
-        TransducerConfig,
+def small_reservoir(**shadow_kwargs):
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        GlobalFloquetPartialShadowReservoir,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        ReadoutResetConfig,
     )
 
-    base = {
-        "n_readout": 2,
-        "n_memory": 2,
-        "floquet": PrethermalFloquetConfig(
-            mode="fast_drive",
-            fast_drive=FastDriveConfig(omega=12.0, n_cycles_per_input=1, drive_amplitude=0.5, drive_seed=8),
-            seed=5,
+    shadow = {"shots": 64, "seed": 12}
+    shadow.update(shadow_kwargs)
+    return GlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(
+            n_qubits=4,
+            n_memory=2,
+            n_readout=2,
+            omega=14.0,
+            n_cycles_per_step=1,
+            seed=10,
         ),
-        "input_write": InputWriteConfig(beta=0.05),
-        "transducer": TransducerConfig(tau_c=0.02, seed=6),
-        "shadow": ShadowReadoutConfig(pauli_k=2, shots=8, seed=7),
-        "simulator_method": "density_matrix",
-        "seed_simulator": 11,
-    }
-    base.update(kwargs)
-    return PrethermalShadowConfig(**base)
+        InputEncodingConfig(beta=0.08, seed=11),
+        PartialShadowReadoutConfig(**shadow),
+        ReadoutResetConfig(reset_state="zero"),
+        seed_simulator=13,
+    )
 
 
-def test_imports_do_not_require_qiskit_execution():
+def test_imports_do_not_require_qiskit():
     import pyqres
-    from pyqres.experimental.prethermal_shadow.config import PrethermalFloquetConfig
-    from pyqres.experimental.prethermal_shadow.shadows import generate_pauli_labels
+    from pyqres.prethermal_shadow import GlobalFloquetConfig, PartialShadowReadoutConfig
 
     assert pyqres.Experiment is not None
-    assert PrethermalFloquetConfig(n_floquet=1).n_floquet == 1
-    assert len(generate_pauli_labels(2, 1)) == 6
+    assert pyqres.GlobalFloquetPartialShadowReservoir is not None
+    assert pyqres.GlobalFloquetInputEncodingConfig is not None
+    assert GlobalFloquetConfig(n_qubits=2, n_memory=1, n_readout=1, omega=10.0, n_cycles_per_step=1)
+    assert PartialShadowReadoutConfig().measurement_type == "projective"
 
 
-def test_feature_label_count():
-    from pyqres.experimental.prethermal_shadow.shadows import feature_label_strings
-
-    labels = feature_label_strings(n_readout=3, pauli_k=2, include_bias=True)
-    assert len(labels) == 1 + 3 * 3 + 9 * 3
-    assert labels[:4] == ["bias", "X0", "Y0", "Z0"]
+def test_experimental_import_path_is_not_provided():
+    with pytest.raises(ModuleNotFoundError):
+        __import__("pyqres.experimental.prethermal_shadow")
 
 
-def test_shadow_config_defaults_to_fast_drive_without_floquet_block():
-    from pyqres.experimental.prethermal_shadow import PrethermalShadowConfig
-    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
+def test_feature_count_and_names():
+    res = small_reservoir(pauli_k=2, include_bias=True)
+    assert len(res.get_feature_names()) == 1 + 3 * 2 + 9
+    assert res.get_feature_names()[:4] == ["bias", "X_r0", "Y_r0", "Z_r0"]
 
-    resolved = validate_and_resolve_config(PrethermalShadowConfig(n_memory=2, n_readout=2))
-    assert resolved.base.floquet.mode == "fast_drive"
-    assert np.isclose(resolved.fast_drive_period, 2.0 * np.pi / resolved.base.floquet.fast_drive.omega)
-    assert np.isclose(
-        resolved.reservoir_dt,
-        resolved.base.floquet.fast_drive.n_cycles_per_input * resolved.fast_drive_period,
+
+def test_weak_povm_validity():
+    from pyqres.prethermal_shadow.dynamics import PAULI
+    from pyqres.prethermal_shadow.shadows import weak_povm_effect
+
+    for axis in ("X", "Y", "Z"):
+        e_plus = weak_povm_effect(axis, +1, 0.4)
+        e_minus = weak_povm_effect(axis, -1, 0.4)
+        assert np.allclose(e_plus + e_minus, PAULI["I"])
+        assert np.min(np.linalg.eigvalsh(e_plus)) >= -1e-12
+        assert np.min(np.linalg.eigvalsh(e_minus)) >= -1e-12
+
+
+def test_weak_estimator_unbiased_single_qubit_by_enumeration():
+    from pyqres.prethermal_shadow.dynamics import PAULI
+    from pyqres.prethermal_shadow.shadows import outcome_probabilities
+
+    rho = np.array([[0.65, 0.12 - 0.08j], [0.12 + 0.08j, 0.35]], dtype=complex)
+    strength = 0.37
+    axes = ("X", "Y", "Z")
+    for target in axes:
+        expected = 0.0
+        for axis in axes:
+            outcomes, probs = outcome_probabilities(rho, [axis], strength)
+            for outcome, prob in zip(outcomes, probs):
+                if axis == target:
+                    expected += (1.0 / 3.0) * prob * (3.0 * outcome[0] / strength)
+        exact = np.trace(PAULI[target] @ rho).real
+        assert np.isclose(expected, exact, atol=1e-12)
+
+
+def test_two_qubit_weak_estimator_unbiased_for_weight_two_by_enumeration():
+    from pyqres.prethermal_shadow.dynamics import PAULI
+    from pyqres.prethermal_shadow.shadows import outcome_probabilities
+
+    psi = np.array([1.0, 0.2j, -0.3, 0.4], dtype=complex)
+    psi = psi / np.linalg.norm(psi)
+    rho = np.outer(psi, psi.conj())
+    strength = 0.6
+    target = ("X", "Z")
+    expected = 0.0
+    for axes in product(("X", "Y", "Z"), repeat=2):
+        outcomes, probs = outcome_probabilities(rho, axes, strength)
+        for outcome, prob in zip(outcomes, probs):
+            if axes == target:
+                expected += (1.0 / 9.0) * prob * (3.0 * outcome[0] / strength) * (3.0 * outcome[1] / strength)
+    exact = np.trace(np.kron(PAULI["X"], PAULI["Z"]) @ rho).real
+    assert np.isclose(expected, exact, atol=1e-12)
+
+
+def test_variance_scaling_for_maximally_mixed_weight_two():
+    from pyqres.prethermal_shadow.shadows import outcome_probabilities
+
+    rho = np.eye(4, dtype=complex) / 4.0
+    strength = 0.5
+    second_moment = 0.0
+    target = ("X", "Z")
+    for axes in product(("X", "Y", "Z"), repeat=2):
+        outcomes, probs = outcome_probabilities(rho, axes, strength)
+        for outcome, prob in zip(outcomes, probs):
+            estimate = 0.0
+            if axes == target:
+                estimate = (3.0 * outcome[0] / strength) * (3.0 * outcome[1] / strength)
+            second_moment += (1.0 / 9.0) * prob * estimate**2
+    assert np.isclose(second_moment, (3.0 / strength**2) ** 2)
+
+
+def test_reset_channel_density_properties():
+    res = small_reservoir(pauli_k=1, exact_expectations=True, return_shadow_estimates=False)
+    features = res.step(0.2)
+    rho = res.rho_memory
+    assert features.shape == (1 + 3 * 2,)
+    assert rho.shape == (4, 4)
+    assert np.isclose(np.trace(rho), 1.0)
+    assert np.allclose(rho, rho.conj().T)
+    assert np.min(np.linalg.eigvalsh(rho)) >= -1e-10
+
+
+def test_projected_channel_shape_and_spectrum():
+    res = small_reservoir(pauli_k=1, exact_expectations=True, return_shadow_estimates=False)
+    channel = res.build_projected_memory_channel(pauli_k=2)
+    expected = 3 * 2 + 9
+    assert channel.shape == (expected, expected)
+    lams = res.memory_channel_spectrum(pauli_k=2)
+    assert lams.shape == (expected,)
+    assert np.all(np.isfinite(lams))
+
+
+def test_reproducibility():
+    inputs = np.linspace(-0.2, 0.2, 4)
+    a = small_reservoir(pauli_k=1, measurement_type="weak", weak_strength=0.7, shots=32)
+    b = small_reservoir(pauli_k=1, measurement_type="weak", weak_strength=0.7, shots=32)
+    assert np.allclose(a.h, b.h)
+    assert np.allclose(a.jz, b.jz)
+    assert np.allclose(a.jxy, b.jxy)
+    assert np.allclose(a.drive_coeffs, b.drive_coeffs)
+    assert np.allclose(a.run(inputs), b.run(inputs))
+
+
+def test_acceptance_shape():
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        GlobalFloquetPartialShadowReservoir,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        ReadoutResetConfig,
     )
 
-
-def test_snapshot_estimator_known_values():
-    from pyqres.experimental.prethermal_shadow.shadows import estimate_shadow_features, generate_pauli_labels
-
-    schedules = np.array(
-        [
-            [["Z", "X"], ["Z", "X"]],
-            [["Z", "Y"], ["X", "X"]],
-            [["X", "X"], ["Z", "X"]],
-        ],
-        dtype="U1",
+    res = GlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(n_qubits=6, n_memory=4, n_readout=2, omega=12.0, n_cycles_per_step=2, seed=0),
+        InputEncodingConfig(input_qubits="memory", axis="y", beta=0.12, random_beta=True, seed=1),
+        PartialShadowReadoutConfig(pauli_k=2, shots=32, measurement_type="weak", weak_strength=0.5, include_bias=True, seed=2),
+        ReadoutResetConfig(reset_after_measurement=True, reset_state="zero"),
+        seed_simulator=3,
     )
-    outcomes = np.array(
-        [
-            [[0, 1], [1, 0]],
-            [[0, 0], [0, 1]],
-            [[1, 0], [0, 0]],
-        ],
-        dtype=np.int8,
-    )
-    labels = generate_pauli_labels(2, 2)
-    features = estimate_shadow_features(schedules, outcomes, labels, include_bias=True)
-    label_to_col = {"bias": 0}
-    for idx, label in enumerate(labels, start=1):
-        label_to_col["*".join(f"{p}{q}" for q, p in label)] = idx
-
-    assert np.allclose(features[:, label_to_col["Z0"]], [2.0, 0.0])
-    assert np.allclose(features[:, label_to_col["X1"]], [0.0, 1.0])
-    assert np.allclose(features[:, label_to_col["Z0*X1"]], [-3.0, 0.0])
-
-
-def test_custom_feature_builder_hook():
-    from pyqres.experimental.prethermal_shadow import PrethermalShadowReservoir
-
-    def sampler(shots, n_steps, n_readout, bases, seed):
-        return np.full((shots, n_steps, n_readout), "Z", dtype="U1")
-
-    def executor(inputs, schedule, cfg, shots):
-        return {"0" * (len(inputs) * cfg.base.n_readout): shots}
-
-    def builder(schedules, outcomes, labels, include_bias):
-        return np.full((schedules.shape[1], 2), 42.0)
-
-    reservoir = PrethermalShadowReservoir(
-        small_config(),
-        basis_sampler=sampler,
-        schedule_executor=executor,
-        feature_builder=builder,
-    )
-    assert np.all(reservoir.run_stream([0.0, 0.1]) == 42.0)
-
-
-def test_duplicate_basis_schedules_are_grouped():
-    from pyqres.experimental.prethermal_shadow import PrethermalShadowReservoir, ShadowReadoutConfig
-
-    seen_group_sizes = []
-
-    def sampler(shots, n_steps, n_readout, bases, seed):
-        schedules = np.full((shots, n_steps, n_readout), "Z", dtype="U1")
-        schedules[-1, :, :] = "X"
-        return schedules
-
-    def executor(inputs, schedule, cfg, shots):
-        seen_group_sizes.append(shots)
-        return {"0" * (len(inputs) * cfg.base.n_readout): shots}
-
-    reservoir = PrethermalShadowReservoir(
-        small_config(shadow=ShadowReadoutConfig(pauli_k=1, shots=5)),
-        basis_sampler=sampler,
-        schedule_executor=executor,
-    )
-    reservoir.run_stream([0.0, 0.1])
-    assert sorted(seen_group_sizes) == [1, 4]
-
-
-def test_zero_transducer_with_mock_executor_shape():
-    from pyqres.experimental.prethermal_shadow import PrethermalFloquetConfig, PrethermalShadowConfig, PrethermalShadowReservoir, ShadowReadoutConfig
-
-    def sampler(shots, n_steps, n_readout, bases, seed):
-        return np.full((shots, n_steps, n_readout), "Z", dtype="U1")
-
-    def executor(inputs, schedule, cfg, shots):
-        return {"0" * (len(inputs) * cfg.base.n_readout): shots}
-
-    reservoir = PrethermalShadowReservoir(
-        PrethermalShadowConfig(
-            n_readout=1,
-            n_memory=1,
-            floquet=PrethermalFloquetConfig(n_floquet=1),
-            transducer=None,
-            shadow=ShadowReadoutConfig(pauli_k=1, shots=4),
-        ),
-        basis_sampler=sampler,
-        schedule_executor=executor,
-    )
-    features = reservoir.run_stream([0.0, 0.2, 0.4])
-    assert features.shape == (3, 4)
-
-
-def test_circuit_measures_and_resets_only_readout():
-    pytest.importorskip("qiskit")
-
-    from pyqres.experimental.prethermal_shadow import PrethermalShadowReservoir
-
-    reservoir = PrethermalShadowReservoir(small_config())
-    schedule = np.full((2, 2), "Z", dtype="U1")
-    circuit = reservoir.build_streaming_circuit([0.0, 0.1], schedule)
-    memory = set(range(reservoir.cfg.base.n_memory))
-    readout = set(range(reservoir.cfg.base.n_memory, reservoir.cfg.base.n_memory + reservoir.cfg.base.n_readout))
-
-    for instruction in circuit.data:
-        if instruction.operation.name in {"measure", "reset"}:
-            touched = {circuit.find_bit(qubit).index for qubit in instruction.qubits}
-            assert touched <= readout
-            assert not touched & memory
-
-
-def test_fast_drive_timing_uses_omega_and_cycles():
-    from pyqres.experimental.prethermal_shadow import FastDriveConfig, PrethermalFloquetConfig, ShadowReadoutConfig
-    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
-
-    cfg = small_config(
-        floquet=PrethermalFloquetConfig(
-            mode="fast_drive",
-            fast_drive=FastDriveConfig(omega=10.0, n_cycles_per_input=3),
-            tau=999.0,
-            n_floquet=99,
-        )
-    )
-    resolved = validate_and_resolve_config(cfg)
-    assert np.isclose(resolved.fast_drive_period, 2.0 * np.pi / 10.0)
-    assert np.isclose(resolved.reservoir_dt, 3.0 * 2.0 * np.pi / 10.0)
-
-
-def test_fast_drive_circuit_block_touches_memory_only():
-    pytest.importorskip("qiskit")
-
-    from qiskit import QuantumCircuit
-
-    from pyqres.experimental.prethermal_shadow.circuits import append_memory_step
-    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
-
-    resolved = validate_and_resolve_config(small_config(n_memory=2, n_readout=2))
-    circuit = QuantumCircuit(4)
-    append_memory_step(circuit, (0, 1), resolved)
-    for instruction in circuit.data:
-        touched = {circuit.find_bit(qubit).index for qubit in instruction.qubits}
-        assert touched <= {0, 1}
-
-
-def test_fast_drive_dense_and_circuit_order_match_small_commuting_case():
-    pytest.importorskip("qiskit")
-
-    from qiskit import QuantumCircuit
-    from qiskit.quantum_info import Operator
-
-    from pyqres.experimental.prethermal_shadow import FastDriveConfig, PrethermalFloquetConfig, ShadowReadoutConfig
-    from pyqres.experimental.prethermal_shadow.circuits import append_fast_drive_period
-    from pyqres.experimental.prethermal_shadow.config import validate_and_resolve_config
-    from pyqres.experimental.prethermal_shadow.dynamics import build_fast_drive_period_unitary
-
-    cfg = small_config(
-        n_memory=1,
-        n_readout=1,
-        shadow=ShadowReadoutConfig(pauli_k=1, shots=8, seed=7),
-        floquet=PrethermalFloquetConfig(
-            mode="fast_drive",
-            fast_drive=FastDriveConfig(
-                omega=7.0,
-                n_cycles_per_input=1,
-                drive_amplitude=0.3,
-                drive_axis="z",
-                drive_pattern="global",
-            ),
-            h=[0.9],
-            x_break=[0.0],
-            seed=3,
-        ),
-    )
-    resolved = validate_and_resolve_config(cfg)
-    circuit = QuantumCircuit(1)
-    append_fast_drive_period(circuit, (0,), resolved)
-    assert np.allclose(np.asarray(Operator(circuit).data), build_fast_drive_period_unitary(resolved), atol=1e-10)
-
-
-def test_fast_drive_diagnostics_reject_maximally_mixed_initial_state():
-    from pyqres.experimental.prethermal_shadow.diagnostics import initial_memory_state
-
-    with pytest.raises(ValueError, match="maximally mixed"):
-        initial_memory_state(2, kind="maximally_mixed")
-
-
-def test_deterministic_aer_execution_and_experiment_smoke(tmp_path):
-    pytest.importorskip("qiskit")
-    pytest.importorskip("qiskit_aer")
-
-    import pyqres as qres
-    from pyqres.experimental.prethermal_shadow import PrethermalFloquetConfig, PrethermalShadowReservoir, ShadowReadoutConfig
-
-    cfg = small_config(
-        n_readout=1,
-        shadow=ShadowReadoutConfig(pauli_k=1, shots=6, seed=17),
-        n_memory=1,
-        floquet=PrethermalFloquetConfig(n_floquet=1, tau=0.05, seed=13),
-        transducer=None,
-        simulator_method="density_matrix",
-        seed_simulator=19,
-    )
-    inputs = np.linspace(0.0, 0.2, 5)
-    reservoir_a = PrethermalShadowReservoir(cfg)
-    reservoir_b = PrethermalShadowReservoir(cfg)
-    xa = reservoir_a.run_stream(inputs)
-    xb = reservoir_b.run_stream(inputs)
-    assert np.allclose(xa, xb)
-    assert np.array_equal(reservoir_a.last_basis_schedules, reservoir_b.last_basis_schedules)
-
-    dataset = qres.data.arrays(inputs, np.roll(inputs, -1)).split(washout=1, train=2, test=2)
-    result = qres.Experiment(reservoir_a, dataset, readout=qres.Ridge(l2=1e-6), metrics=["mse"]).run()
-    out = result.save(tmp_path / "run")
-    assert (out / "metrics.json").exists()
-    assert result.features.shape[0] == inputs.shape[0]
+    x = res.run(np.random.default_rng(0).normal(size=3))
+    assert x.shape == (3, 1 + (3 * 2 + 9))
+    assert len(res.get_feature_names()) == x.shape[1]

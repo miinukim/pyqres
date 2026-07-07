@@ -1,27 +1,16 @@
-"""Run a small prethermal shadow reservoir forecasting example.
-
-This example prefers pyqres-tasks' Mackey-Glass dataset when available. If that
-package is not installed, it falls back to a short sinusoid so the example can
-still be run from this repository.
-
-Advanced users can pass custom ``basis_sampler``, ``schedule_executor``, or
-``feature_builder`` callables to ``PrethermalShadowReservoir`` to replace the
-default random schedules, Aer execution, or shadow reconstruction.
-"""
+"""Small Mackey-Glass example for global-Floquet partial-shadow QRC."""
 
 from __future__ import annotations
 
 import numpy as np
 
 import pyqres as qres
-from pyqres.experimental.prethermal_shadow import (
-    FastDriveConfig,
-    InputWriteConfig,
-    PrethermalFloquetConfig,
-    PrethermalShadowConfig,
-    PrethermalShadowReservoir,
-    ShadowReadoutConfig,
-    TransducerConfig,
+from pyqres.prethermal_shadow import (
+    GlobalFloquetConfig,
+    GlobalFloquetPartialShadowReservoir,
+    InputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
 )
 
 
@@ -38,30 +27,23 @@ def make_dataset():
 
 
 def main() -> None:
-    cfg = PrethermalShadowConfig(
-        n_memory=3,
-        n_readout=2,
-        floquet=PrethermalFloquetConfig(
-            fast_drive=FastDriveConfig(omega=18.0, n_cycles_per_input=2, drive_amplitude=0.8, drive_seed=41),
-            seed=23,
-        ),
-        input_write=InputWriteConfig(axis="y", beta=0.08, bias=0.0),
-        transducer=TransducerConfig(tau_c=0.04, seed=29),
-        shadow=ShadowReadoutConfig(pauli_k=2, shots=12, include_bias=True, seed=31),
-        simulator_method="density_matrix",
+    reservoir = GlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(n_qubits=5, n_memory=3, n_readout=2, omega=16.0, n_cycles_per_step=2, seed=23),
+        InputEncodingConfig(input_qubits="memory", axis="y", beta=0.08, seed=29),
+        PartialShadowReadoutConfig(pauli_k=2, shots=64, include_bias=True, measurement_type="projective", seed=31),
+        ReadoutResetConfig(reset_state="zero"),
         seed_simulator=37,
     )
-    reservoir = PrethermalShadowReservoir(cfg)
     dataset = make_dataset()
     result = qres.Experiment(
         reservoir=reservoir,
         dataset=dataset,
         readout=qres.Ridge(l2=1e-6),
         metrics=["mse", "r2"],
-        metadata={"example": "prethermal_shadow_mackey_glass"},
+        metadata={"example": "global_floquet_partial_shadow_mackey_glass"},
     ).run()
     print("feature_shape:", result.features.shape)
-    print("feature_labels:", reservoir.feature_labels)
+    print("feature_labels:", reservoir.get_feature_names())
     print("metrics:", result.metrics)
 
 

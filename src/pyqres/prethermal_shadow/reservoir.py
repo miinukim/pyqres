@@ -1,151 +1,325 @@
 from __future__ import annotations
 
-"""Reservoir object that emits prethermal classical-shadow features."""
+"""Global-Floquet reservoir with partial classical-shadow readout."""
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from collections.abc import Sequence
+from itertools import combinations, product
 
 import numpy as np
+import scipy.linalg as la
 
-from .circuits import build_streaming_circuit
-from .config import PrethermalShadowConfig, ResolvedPrethermalShadowConfig, validate_and_resolve_config
+from .config import GlobalFloquetConfig, InputEncodingConfig, PartialShadowReadoutConfig, ReadoutResetConfig
+from .dynamics import (
+    build_drive_hamiltonian,
+    build_global_h0,
+    build_step_unitary,
+    density_plus,
+    density_zero,
+    generate_hamiltonian_parameters,
+    kron_all,
+    partial_trace_memory_first,
+    pauli_string,
+    project_density,
+    step_duration,
+    validate_floquet_config,
+)
 from .shadows import (
-    PauliLabel,
-    counts_to_outcomes,
-    estimate_shadow_features,
-    feature_label_strings,
+    exact_readout_expectations,
     generate_pauli_labels,
-    group_basis_schedules,
-    sample_basis_schedules,
+    partial_shadow_feature_names,
+    sample_partial_shadow_features,
 )
 
-try:
-    from qiskit import transpile
-except Exception:  # pragma: no cover - optional dependency
-    transpile = None  # type: ignore
 
-try:
-    from qiskit_aer import AerSimulator
-except Exception:  # pragma: no cover - optional dependency
-    AerSimulator = None  # type: ignore
+def _validate_axis(axis: str, name: str) -> str:
+    out = str(axis).upper()
+    if out not in {"X", "Y", "Z"}:
+        raise ValueError(f"{name} must be x, y, or z.")
+    return out
 
 
-BasisSampler = Callable[[int, int, int, Sequence[str], int], np.ndarray]
-ScheduleExecutor = Callable[[Sequence[float], np.ndarray, ResolvedPrethermalShadowConfig, int], Mapping[str, int]]
-FeatureBuilder = Callable[[np.ndarray, np.ndarray, Sequence[PauliLabel], bool], np.ndarray]
+def _resolve_input_qubits(cfg: InputEncodingConfig, floquet: GlobalFloquetConfig) -> tuple[int, ...]:
+    spec = cfg.input_qubits
+    if isinstance(spec, str):
+        key = spec.lower()
+        if key == "memory":
+            return tuple(range(int(floquet.n_memory)))
+        if key == "all":
+            return tuple(range(int(floquet.n_qubits)))
+        raise ValueError("input_qubits must be 'memory', 'all', or a sequence of indices.")
+    qubits = tuple(int(q) for q in spec)
+    if not qubits:
+        raise ValueError("input_qubits sequence must be non-empty.")
+    if any(q < 0 or q >= int(floquet.n_qubits) for q in qubits):
+        raise ValueError("input_qubits contains an out-of-range qubit.")
+    return qubits
 
 
-class PrethermalShadowReservoir:
-    """Qiskit/Aer prethermal shadow reservoir.
+def _beta_array(cfg: InputEncodingConfig, n_targets: int) -> np.ndarray:
+    if isinstance(cfg.beta, (int, float, np.floating)):
+        base = np.full(int(n_targets), float(cfg.beta), dtype=float)
+    else:
+        base = np.asarray(cfg.beta, dtype=float).reshape(-1)
+        if base.shape != (int(n_targets),):
+            raise ValueError(f"beta must be scalar or length {n_targets}.")
+    if not cfg.random_beta:
+        return base
+    rng = np.random.default_rng(int(cfg.seed))
+    return base * rng.uniform(0.5, 1.5, size=int(n_targets))
 
-    The object follows pyqres' duck-typed reservoir contract by exposing
-    ``run_stream``, ``run``, and ``transform``.
-    """
+
+def _low_weight_labels(n_qubits: int, pauli_k: int) -> list[tuple[tuple[int, str], ...]]:
+    labels = []
+    for weight in range(1, int(pauli_k) + 1):
+        for sites in combinations(range(int(n_qubits)), weight):
+            for paulis in product(("X", "Y", "Z"), repeat=weight):
+                labels.append(tuple((int(site), str(pauli)) for site, pauli in zip(sites, paulis)))
+    return labels
+
+
+class GlobalFloquetPartialShadowReservoir:
+    """Dense global-Floquet QRC with partial local Pauli-shadow readout."""
 
     def __init__(
         self,
-        cfg: PrethermalShadowConfig,
-        *,
-        basis_sampler: BasisSampler | None = None,
-        schedule_executor: ScheduleExecutor | None = None,
-        feature_builder: FeatureBuilder | None = None,
+        floquet_config: GlobalFloquetConfig,
+        input_config: InputEncodingConfig | None = None,
+        shadow_config: PartialShadowReadoutConfig | None = None,
+        reset_config: ReadoutResetConfig | None = None,
+        simulator_method: str = "density_matrix",
+        seed_simulator: int | None = None,
     ):
-        self.cfg = validate_and_resolve_config(cfg)
-        self.basis_sampler = basis_sampler or sample_basis_schedules
-        self.schedule_executor = schedule_executor or self._execute_schedule
-        self.feature_builder = feature_builder or self._build_features
-        self.pauli_labels = generate_pauli_labels(self.cfg.base.n_readout, self.cfg.base.shadow.pauli_k)
-        self.feature_labels = feature_label_strings(
-            self.cfg.base.n_readout,
-            self.cfg.base.shadow.pauli_k,
-            include_bias=self.cfg.base.shadow.include_bias,
+        validate_floquet_config(floquet_config)
+        if simulator_method != "density_matrix":
+            raise ValueError("GlobalFloquetPartialShadowReservoir currently requires simulator_method='density_matrix'.")
+        self.floquet_config = floquet_config
+        self.input_config = input_config or InputEncodingConfig()
+        self.shadow_config = shadow_config or PartialShadowReadoutConfig()
+        self.reset_config = reset_config or ReadoutResetConfig()
+        self.simulator_method = simulator_method
+        self.seed_simulator = seed_simulator
+
+        self.n_qubits = int(floquet_config.n_qubits)
+        self.n_memory = int(floquet_config.n_memory)
+        self.n_readout = int(floquet_config.n_readout)
+        self.dim_memory = 2**self.n_memory
+        self.dim_readout = 2**self.n_readout
+        self.dim_total = 2**self.n_qubits
+        self.delta_t = step_duration(floquet_config)
+
+        if int(self.shadow_config.pauli_k) < 1 or int(self.shadow_config.pauli_k) > self.n_readout:
+            raise ValueError("shadow pauli_k must lie in [1, n_readout].")
+        if int(self.shadow_config.shots) <= 0:
+            raise ValueError("shadow shots must be positive.")
+        if str(self.shadow_config.measurement_type).lower() not in {"projective", "weak"}:
+            raise ValueError("measurement_type must be projective or weak.")
+        if not (0.0 < float(self.shadow_config.weak_strength) <= 1.0):
+            raise ValueError("weak_strength must lie in (0, 1].")
+        if self.shadow_config.basis_randomization != "local_pauli":
+            raise ValueError("only basis_randomization='local_pauli' is supported.")
+        if not self.reset_config.reset_after_measurement or not self.reset_config.trace_readout_after_step:
+            raise NotImplementedError("only trace/reset readout updates are implemented.")
+        if self.reset_config.reset_state not in {"zero", "plus"}:
+            raise ValueError("reset_state must be 'zero' or 'plus'.")
+
+        params = generate_hamiltonian_parameters(floquet_config)
+        self.edges = params["edges"]
+        self.h = np.asarray(params["h"], dtype=float)
+        self.jz = np.asarray(params["jz"], dtype=float)
+        self.jxy = np.asarray(params["jxy"], dtype=float)
+        self.drive_coeffs = np.asarray(params["drive_coeffs"], dtype=float)
+        self.break_coeffs = np.asarray(params["break_coeffs"], dtype=float)
+        self.h0 = build_global_h0(
+            floquet_config,
+            h=self.h,
+            jz=self.jz,
+            jxy=self.jxy,
+            break_coeffs=self.break_coeffs,
+            edges=self.edges,
         )
-        self.last_basis_schedules: np.ndarray | None = None
+        self.drive_hamiltonian = build_drive_hamiltonian(floquet_config, self.drive_coeffs)
+        self.u_floquet_step = build_step_unitary(floquet_config, self.h0, self.drive_hamiltonian)
 
-    def run(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
-        """Run a stream and return a feature matrix."""
-
-        return self.run_stream(inputs)
-
-    def transform(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
-        """Scikit-style alias."""
-
-        return self.run_stream(inputs)
-
-    def run_stream(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
-        """Sample shadow schedules, execute grouped circuits, and estimate features."""
-
-        values = np.asarray(inputs, dtype=float).reshape(-1)
-        if values.size == 0:
-            return np.empty((0, len(self.feature_labels)), dtype=float)
-        shadow = self.cfg.base.shadow
-        schedules = self.basis_sampler(
-            int(shadow.shots),
-            int(values.shape[0]),
-            int(self.cfg.base.n_readout),
-            tuple(shadow.bases),
-            int(shadow.seed),
+        self.input_qubits = _resolve_input_qubits(self.input_config, floquet_config)
+        self.input_axis = _validate_axis(self.input_config.axis, "input axis")
+        self.beta = _beta_array(self.input_config, len(self.input_qubits))
+        self.pauli_labels = generate_pauli_labels(self.n_readout, int(self.shadow_config.pauli_k))
+        self.feature_names = partial_shadow_feature_names(
+            self.n_readout,
+            int(self.shadow_config.pauli_k),
+            include_bias=bool(self.shadow_config.include_bias),
         )
-        schedules = np.asarray(schedules, dtype="U1")
-        expected = (int(shadow.shots), int(values.shape[0]), int(self.cfg.base.n_readout))
-        if schedules.shape != expected:
-            raise ValueError(f"basis_sampler returned shape {schedules.shape}, expected {expected}.")
-        self.last_basis_schedules = schedules.copy()
+        self._rng_seed = int(self.shadow_config.seed if seed_simulator is None else seed_simulator)
+        self.last_raw_shots: dict[str, np.ndarray] | None = None
+        self.reset_state()
 
-        schedule_blocks: list[np.ndarray] = []
-        outcome_blocks: list[np.ndarray] = []
-        for schedule, group_size, _ in group_basis_schedules(schedules):
-            counts = self.schedule_executor(values, schedule, self.cfg, group_size)
-            outcomes = counts_to_outcomes(
-                counts,
-                shots=group_size,
-                n_steps=int(values.shape[0]),
-                n_readout=int(self.cfg.base.n_readout),
-            )
-            schedule_blocks.append(np.repeat(schedule[None, :, :], group_size, axis=0))
-            outcome_blocks.append(outcomes)
+    def reset_state(self) -> None:
+        """Reset persistent memory state and the shadow RNG."""
 
-        merged_schedules = np.concatenate(schedule_blocks, axis=0)
-        merged_outcomes = np.concatenate(outcome_blocks, axis=0)
-        features = self.feature_builder(
-            merged_schedules,
-            merged_outcomes,
+        self.rho_memory = density_zero(self.n_memory)
+        self._shadow_rng = np.random.default_rng(self._rng_seed)
+        self.last_raw_shots = None
+
+    def _readout_reset_state(self) -> np.ndarray:
+        if self.reset_config.reset_state == "zero":
+            return density_zero(self.n_readout)
+        return density_plus(self.n_readout)
+
+    def _input_unitary(self, u: float) -> np.ndarray:
+        out = np.eye(self.dim_total, dtype=complex)
+        scale = float(u) + float(self.input_config.bias)
+        for q, beta in zip(self.input_qubits, self.beta):
+            generator = pauli_string(self.n_qubits, [(int(q), self.input_axis)])
+            out = la.expm(-1j * float(beta) * scale * generator) @ out
+        return out
+
+    def _pre_measurement_state(self, rho_memory: np.ndarray, u: float) -> np.ndarray:
+        rho0 = np.kron(project_density(rho_memory), self._readout_reset_state())
+        u_step = self.u_floquet_step @ self._input_unitary(float(u))
+        rho_pre = u_step @ rho0 @ u_step.conj().T
+        return project_density(rho_pre)
+
+    def exact_features_from_state(self, rho_pre: np.ndarray) -> np.ndarray:
+        """Compute exact readout Pauli expectations from a pre-reset full state."""
+
+        rho_r = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+        return exact_readout_expectations(
+            project_density(rho_r),
             self.pauli_labels,
-            bool(shadow.include_bias),
+            include_bias=bool(self.shadow_config.include_bias),
         )
+
+    def shadow_features_from_state(self, rho_pre: np.ndarray, shots: int) -> np.ndarray:
+        """Simulate partial local Pauli shadow feature estimates on readout."""
+
+        rho_r = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+        result = sample_partial_shadow_features(
+            project_density(rho_r),
+            self.pauli_labels,
+            shots=int(shots),
+            measurement_type=str(self.shadow_config.measurement_type),
+            weak_strength=float(self.shadow_config.weak_strength),
+            include_bias=bool(self.shadow_config.include_bias),
+            rng=self._shadow_rng,
+            return_raw=bool(self.shadow_config.return_raw_shots),
+        )
+        if isinstance(result, tuple):
+            features, raw = result
+            self.last_raw_shots = raw
+            return np.asarray(features, dtype=float)
+        self.last_raw_shots = None
+        return np.asarray(result, dtype=float)
+
+    def step(self, u: float) -> np.ndarray:
+        """Apply one reservoir step and return one feature vector."""
+
+        rho_pre = self._pre_measurement_state(self.rho_memory, float(u))
+        if self.shadow_config.exact_expectations or not self.shadow_config.return_shadow_estimates:
+            features = self.exact_features_from_state(rho_pre)
+        else:
+            features = self.shadow_features_from_state(rho_pre, int(self.shadow_config.shots))
+        self.rho_memory = project_density(partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="memory"))
         return np.asarray(features, dtype=float)
 
-    @staticmethod
-    def _build_features(schedules: np.ndarray, outcomes: np.ndarray, labels: Sequence[PauliLabel], include_bias: bool) -> np.ndarray:
-        """Default feature-builder adapter."""
+    def run(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
+        """Run over a scalar input sequence and return a feature matrix."""
 
-        return estimate_shadow_features(schedules, outcomes, labels, include_bias=include_bias)
+        values = np.asarray(inputs, dtype=float).reshape(-1)
+        self.reset_state()
+        if values.size == 0:
+            return np.empty((0, len(self.feature_names)), dtype=float)
+        return np.vstack([self.step(float(value)) for value in values])
 
-    def build_streaming_circuit(self, inputs: Sequence[float] | np.ndarray, basis_schedule: np.ndarray) -> Any:
-        """Build one Qiskit circuit for a fixed basis schedule."""
+    def run_stream(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
+        """pyqres reservoir protocol alias."""
 
-        return build_streaming_circuit(inputs, basis_schedule, self.cfg)
+        return self.run(inputs)
 
-    def _execute_schedule(self, inputs: Sequence[float] | np.ndarray, basis_schedule: np.ndarray, cfg: ResolvedPrethermalShadowConfig, shots: int) -> Mapping[str, int]:
-        """Execute one grouped basis schedule with Aer."""
+    def transform(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
+        """scikit-style alias."""
 
-        if AerSimulator is None:
-            raise ImportError("qiskit-aer is required for PrethermalShadowReservoir execution.")
-        if transpile is None:
-            raise ImportError("qiskit is required for PrethermalShadowReservoir execution.")
-        qc = build_streaming_circuit(inputs, basis_schedule, cfg)
-        backend_options: dict[str, Any] = {
-            "method": cfg.base.simulator_method,
-            "seed_simulator": int(cfg.base.seed_simulator),
-            **dict(cfg.base.aer_options),
-        }
-        if cfg.base.simulator_device != "automatic":
-            backend_options["device"] = cfg.base.simulator_device
-        backend = AerSimulator(**backend_options)
-        executable = transpile(
-            qc,
-            backend=backend,
-            optimization_level=int(cfg.base.transpile_optimization_level),
+        return self.run(inputs)
+
+    def get_feature_names(self) -> list[str]:
+        """Return readout Pauli feature names."""
+
+        return list(self.feature_names)
+
+    @property
+    def feature_labels(self) -> list[str]:
+        """Compatibility alias used by pyqres examples."""
+
+        return self.get_feature_names()
+
+    def _memory_channel(self, op_memory: np.ndarray, u_bar: float = 0.0) -> np.ndarray:
+        rho0 = np.kron(np.asarray(op_memory, dtype=complex), self._readout_reset_state())
+        u_step = self.u_floquet_step @ self._input_unitary(float(u_bar))
+        out = u_step @ rho0 @ u_step.conj().T
+        return partial_trace_memory_first(out, self.n_memory, self.n_readout, keep="memory")
+
+    def build_projected_memory_channel(self, pauli_k: int = 2) -> np.ndarray:
+        """Build projected induced memory channel on low-weight memory Paulis."""
+
+        labels = _low_weight_labels(self.n_memory, int(pauli_k))
+        ops = [pauli_string(self.n_memory, label) for label in labels]
+        dim = self.dim_memory
+        mat = np.zeros((len(ops), len(ops)), dtype=complex)
+        for nu, op_in in enumerate(ops):
+            evolved = self._memory_channel(op_in)
+            for mu, op_out in enumerate(ops):
+                mat[mu, nu] = np.trace(op_out @ evolved) / dim
+        return mat
+
+    def memory_channel_spectrum(self, pauli_k: int = 2) -> np.ndarray:
+        """Return eigenvalues of the projected induced memory channel."""
+
+        return np.linalg.eigvals(self.build_projected_memory_channel(pauli_k=pauli_k))
+
+    def _scope_expectations(self, rho_pre: np.ndarray, scope: str, pauli_k: int) -> np.ndarray:
+        scope_key = str(scope).lower()
+        if scope_key == "full":
+            rho = rho_pre
+            n = self.n_qubits
+        elif scope_key == "memory":
+            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="memory")
+            n = self.n_memory
+        elif scope_key == "readout":
+            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+            n = self.n_readout
+        else:
+            raise ValueError("observable_scope must be full, memory, or readout.")
+        return np.asarray(
+            [float(np.real_if_close(np.trace(pauli_string(n, label) @ rho))) for label in _low_weight_labels(n, int(pauli_k))],
+            dtype=float,
         )
-        result = backend.run(executable, shots=int(shots)).result()
-        return result.get_counts(0)
+
+    def branch_sensitivity(
+        self,
+        u0: float,
+        delta: float,
+        horizon: int,
+        observable_scope: str = "readout",
+        pauli_k: int = 2,
+    ) -> np.ndarray:
+        """Distinguish two branches initialized by u0 +/- delta, then zero input."""
+
+        if int(horizon) <= 0:
+            return np.empty((0,), dtype=float)
+        rho_plus = density_zero(self.n_memory)
+        rho_minus = density_zero(self.n_memory)
+        out = []
+        for t in range(int(horizon)):
+            u_plus = float(u0) + float(delta) if t == 0 else 0.0
+            u_minus = float(u0) - float(delta) if t == 0 else 0.0
+            pre_plus = self._pre_measurement_state(rho_plus, u_plus)
+            pre_minus = self._pre_measurement_state(rho_minus, u_minus)
+            diff = self._scope_expectations(pre_plus, observable_scope, pauli_k) - self._scope_expectations(pre_minus, observable_scope, pauli_k)
+            out.append(float(np.linalg.norm(diff)))
+            rho_plus = project_density(partial_trace_memory_first(pre_plus, self.n_memory, self.n_readout, keep="memory"))
+            rho_minus = project_density(partial_trace_memory_first(pre_minus, self.n_memory, self.n_readout, keep="memory"))
+        return np.asarray(out, dtype=float)
+
+
+__all__ = [
+    "GlobalFloquetPartialShadowReservoir",
+]

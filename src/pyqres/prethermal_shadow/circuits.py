@@ -1,188 +1,20 @@
 from __future__ import annotations
 
-"""Qiskit circuit builders for prethermal shadow reservoirs."""
+"""Circuit stubs for the global-Floquet partial-shadow reservoir.
 
-from collections.abc import Sequence
-
-import numpy as np
-
-from .config import ResolvedPrethermalShadowConfig
-
-try:
-    from qiskit import QuantumCircuit
-except Exception:  # pragma: no cover - optional dependency
-    QuantumCircuit = None  # type: ignore
+The current implementation is intentionally dense density-matrix based. Qiskit
+circuit construction for the all-qubit Floquet block can be added later without
+changing the public dense reservoir API.
+"""
 
 
-def require_qiskit() -> None:
-    """Raise a clear error if Qiskit is unavailable."""
+def require_qiskit_circuit_backend() -> None:
+    """Raise a clear error for circuit-backed execution."""
 
-    if QuantumCircuit is None:
-        raise ImportError("qiskit is required for prethermal shadow circuits.")
-
-
-def append_input_write(qc: "QuantumCircuit", memory: Sequence[int], u: float, cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append input-dependent rotations on memory qubits."""
-
-    angle_scale = float(u + cfg.base.input_write.bias)
-    axis = cfg.base.input_write.axis
-    for i, q in enumerate(memory):
-        angle = 2.0 * float(cfg.beta[i]) * angle_scale
-        if axis == "x":
-            qc.rx(angle, int(q))
-        elif axis == "y":
-            qc.ry(angle, int(q))
-        elif axis == "z":
-            qc.rz(angle, int(q))
-        else:  # pragma: no cover - validated earlier
-            raise ValueError(f"unsupported input axis {axis}")
+    raise NotImplementedError(
+        "GlobalFloquetPartialShadowReservoir currently supports dense density-matrix "
+        "simulation only; Qiskit circuit construction is not implemented yet."
+    )
 
 
-def append_floquet_period(qc: "QuantumCircuit", memory: Sequence[int], cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append one legacy effective-static memory-only period."""
-
-    tau = float(cfg.base.floquet.tau)
-    for i, q in enumerate(memory):
-        qc.rz(2.0 * float(cfg.h[i]) * tau, int(q))
-    for e, (i, j) in enumerate(cfg.edges):
-        qc.rzz(2.0 * float(cfg.jz[e]) * tau, int(memory[i]), int(memory[j]))
-    for e, (i, j) in enumerate(cfg.edges):
-        angle = 2.0 * float(cfg.jxy[e]) * tau
-        qc.rxx(angle, int(memory[i]), int(memory[j]))
-        qc.ryy(angle, int(memory[i]), int(memory[j]))
-    for i, q in enumerate(memory):
-        angle = 2.0 * float(cfg.x_break[i]) * tau
-        if angle != 0.0:
-            qc.rx(angle, int(q))
-
-
-def append_prethermal_block(qc: "QuantumCircuit", memory: Sequence[int], cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append the memory evolution for one input step."""
-
-    append_memory_step(qc, memory, cfg)
-
-
-def append_hamiltonian_layer(
-    qc: "QuantumCircuit",
-    memory: Sequence[int],
-    cfg: ResolvedPrethermalShadowConfig,
-    *,
-    dt: float,
-    drive_sign: float,
-) -> None:
-    """Append one Trotterized memory Hamiltonian layer."""
-
-    for i, q in enumerate(memory):
-        qc.rz(2.0 * float(dt) * float(cfg.h[i]), int(q))
-    for e, (i, j) in enumerate(cfg.edges):
-        qc.rzz(2.0 * float(dt) * float(cfg.jz[e]), int(memory[i]), int(memory[j]))
-    for e, (i, j) in enumerate(cfg.edges):
-        angle = 2.0 * float(dt) * float(cfg.jxy[e])
-        qc.rxx(angle, int(memory[i]), int(memory[j]))
-        qc.ryy(angle, int(memory[i]), int(memory[j]))
-    for i, q in enumerate(memory):
-        angle = 2.0 * float(dt) * float(cfg.x_break[i])
-        if angle != 0.0:
-            qc.rx(angle, int(q))
-
-    axis = str(cfg.base.floquet.fast_drive.drive_axis).lower()
-    for i, q in enumerate(memory):
-        angle = 2.0 * float(dt) * float(drive_sign) * float(cfg.drive[i])
-        if angle == 0.0:
-            continue
-        if axis == "x":
-            qc.rx(angle, int(q))
-        elif axis == "y":
-            qc.ry(angle, int(q))
-        elif axis == "z":
-            qc.rz(angle, int(q))
-        else:  # pragma: no cover - validated earlier
-            raise ValueError(f"unsupported drive axis {axis}")
-
-
-def append_fast_drive_period(qc: "QuantumCircuit", memory: Sequence[int], cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append one binary high-frequency fast-drive period."""
-
-    if cfg.fast_drive_period is None:
-        raise ValueError("fast drive period is not defined for effective_static mode.")
-    half_period = 0.5 * float(cfg.fast_drive_period)
-    append_hamiltonian_layer(qc, memory, cfg, dt=half_period, drive_sign=+1.0)
-    append_hamiltonian_layer(qc, memory, cfg, dt=half_period, drive_sign=-1.0)
-
-
-def append_memory_step(qc: "QuantumCircuit", memory: Sequence[int], cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append memory-only evolution for one reservoir input interval."""
-
-    if cfg.base.floquet.mode == "effective_static":
-        for _ in range(int(cfg.base.floquet.n_floquet)):
-            append_floquet_period(qc, memory, cfg)
-        return
-
-    for _ in range(int(cfg.base.floquet.fast_drive.n_cycles_per_input)):
-        append_fast_drive_period(qc, memory, cfg)
-
-
-def append_prepare_readout_plus(qc: "QuantumCircuit", readout: Sequence[int]) -> None:
-    """Reset readout qubits and prepare |+>."""
-
-    for q in readout:
-        qc.reset(int(q))
-        qc.h(int(q))
-
-
-def append_transducer(qc: "QuantumCircuit", memory: Sequence[int], readout: Sequence[int], cfg: ResolvedPrethermalShadowConfig) -> None:
-    """Append the optional memory-readout RZZ transducer."""
-
-    if cfg.base.transducer is None or cfg.g is None:
-        return
-    tau_c = float(cfg.base.transducer.tau_c)
-    if tau_c == 0.0:
-        return
-    for alpha, rq in enumerate(readout):
-        for i, mq in enumerate(memory):
-            qc.rzz(2.0 * tau_c * float(cfg.g[alpha, i]), int(rq), int(mq))
-
-
-def append_shadow_basis_rotations(qc: "QuantumCircuit", readout: Sequence[int], basis_for_step: Sequence[str]) -> None:
-    """Rotate readout qubits so computational measurements sample Pauli bases."""
-
-    for q, basis in zip(readout, basis_for_step):
-        basis = str(basis).upper()
-        if basis == "X":
-            qc.h(int(q))
-        elif basis == "Y":
-            qc.sdg(int(q))
-            qc.h(int(q))
-        elif basis == "Z":
-            pass
-        else:
-            raise ValueError(f"unsupported shadow basis {basis}")
-
-
-def build_streaming_circuit(inputs: Sequence[float] | np.ndarray, basis_schedule: np.ndarray, cfg: ResolvedPrethermalShadowConfig) -> "QuantumCircuit":
-    """Build one full streaming circuit for a fixed basis schedule."""
-
-    require_qiskit()
-    values = np.asarray(inputs, dtype=float).reshape(-1)
-    schedule = np.asarray(basis_schedule, dtype="U1")
-    n_memory = int(cfg.base.n_memory)
-    n_readout = int(cfg.base.n_readout)
-    if schedule.shape != (values.shape[0], n_readout):
-        raise ValueError(f"basis_schedule must have shape {(values.shape[0], n_readout)}, got {schedule.shape}.")
-    total_qubits = n_memory + n_readout
-    memory = tuple(range(n_memory))
-    readout = tuple(range(n_memory, total_qubits))
-    qc = QuantumCircuit(total_qubits, values.shape[0] * n_readout)
-    cidx = 0
-    for t, u_t in enumerate(values):
-        append_prepare_readout_plus(qc, readout)
-        append_input_write(qc, memory, float(u_t), cfg)
-        append_prethermal_block(qc, memory, cfg)
-        append_transducer(qc, memory, readout, cfg)
-        append_shadow_basis_rotations(qc, readout, schedule[t])
-        for k, rq in enumerate(readout):
-            qc.measure(int(rq), cidx + k)
-        cidx += n_readout
-        for rq in readout:
-            qc.reset(int(rq))
-    return qc
+__all__ = ["require_qiskit_circuit_backend"]

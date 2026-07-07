@@ -8,6 +8,8 @@ from itertools import combinations, product
 
 import numpy as np
 
+from .dynamics import PAULI, kron_all, pauli_string
+
 
 PauliLabel = tuple[tuple[int, str], ...]
 
@@ -38,6 +40,129 @@ def feature_label_strings(n_readout: int, pauli_k: int, include_bias: bool = Tru
     if include_bias:
         return ["bias", *labels]
     return labels
+
+
+def partial_shadow_feature_names(n_readout: int, pauli_k: int, include_bias: bool = True) -> list[str]:
+    """Return readout-subset feature names such as X_r0 and X_r0 Y_r1."""
+
+    labels = []
+    for label in generate_pauli_labels(n_readout, pauli_k):
+        labels.append(" ".join(f"{pauli}_r{qubit}" for qubit, pauli in label))
+    if include_bias:
+        return ["bias", *labels]
+    return labels
+
+
+def readout_pauli_operator(n_readout: int, label: PauliLabel) -> np.ndarray:
+    """Build a dense Pauli string acting only on readout Hilbert space."""
+
+    return pauli_string(int(n_readout), label)
+
+
+def exact_readout_expectations(
+    rho_readout: np.ndarray,
+    labels: Sequence[PauliLabel],
+    *,
+    include_bias: bool = True,
+) -> np.ndarray:
+    """Compute exact readout Pauli expectations from a readout marginal."""
+
+    rho = np.asarray(rho_readout, dtype=complex)
+    values = [float(np.real_if_close(np.trace(readout_pauli_operator(int(np.log2(rho.shape[0])), label) @ rho))) for label in labels]
+    if include_bias:
+        return np.asarray([1.0, *values], dtype=float)
+    return np.asarray(values, dtype=float)
+
+
+def weak_povm_effect(pauli: str, m: int, strength: float) -> np.ndarray:
+    """Return E_m = (I + m s A) / 2 for one weak Pauli measurement."""
+
+    s = float(strength)
+    if not (0.0 < s <= 1.0):
+        raise ValueError("weak_strength must lie in (0, 1].")
+    axis = str(pauli).upper()
+    if axis not in {"X", "Y", "Z"}:
+        raise ValueError("weak POVM axis must be X, Y, or Z.")
+    return 0.5 * (PAULI["I"] + int(m) * s * PAULI[axis])
+
+
+def joint_povm_effect(axes: Sequence[str], outcomes: Sequence[int], strength: float) -> np.ndarray:
+    """Return tensor-product weak POVM effect for a readout shot."""
+
+    return kron_all([weak_povm_effect(axis, int(m), strength) for axis, m in zip(axes, outcomes)])
+
+
+def outcome_probabilities(rho_readout: np.ndarray, axes: Sequence[str], strength: float) -> tuple[list[tuple[int, ...]], np.ndarray]:
+    """Return all local weak/projective outcome probabilities for chosen axes."""
+
+    n_readout = len(tuple(axes))
+    outcomes = list(product((-1, 1), repeat=n_readout))
+    probs = []
+    for outcome in outcomes:
+        effect = joint_povm_effect(axes, outcome, strength)
+        probs.append(float(np.real_if_close(np.trace(effect @ rho_readout))))
+    arr = np.asarray(probs, dtype=float)
+    arr = np.maximum(arr, 0.0)
+    total = float(arr.sum())
+    if total <= 0.0:
+        arr = np.full_like(arr, 1.0 / arr.size)
+    else:
+        arr /= total
+    return outcomes, arr
+
+
+def sample_partial_shadow_features(
+    rho_readout: np.ndarray,
+    labels: Sequence[PauliLabel],
+    *,
+    shots: int,
+    measurement_type: str = "projective",
+    weak_strength: float = 1.0,
+    include_bias: bool = True,
+    seed: int | None = None,
+    rng: np.random.Generator | None = None,
+    return_raw: bool = False,
+) -> np.ndarray | tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Estimate readout Pauli features with local projective or weak shadows."""
+
+    if int(shots) <= 0:
+        raise ValueError("shots must be positive.")
+    rho = np.asarray(rho_readout, dtype=complex)
+    n_readout = int(round(np.log2(rho.shape[0])))
+    if rho.shape != (2**n_readout, 2**n_readout):
+        raise ValueError("rho_readout must be a square 2**n_readout matrix.")
+    kind = str(measurement_type).lower()
+    if kind not in {"projective", "weak"}:
+        raise ValueError("measurement_type must be projective or weak.")
+    strength = 1.0 if kind == "projective" else float(weak_strength)
+    if not (0.0 < strength <= 1.0):
+        raise ValueError("weak_strength must lie in (0, 1].")
+
+    local_rng = np.random.default_rng(seed) if rng is None else rng
+    axes_all = np.asarray(["X", "Y", "Z"], dtype="U1")
+    estimates = np.zeros((int(shots), len(labels)), dtype=float)
+    axes_record = np.empty((int(shots), n_readout), dtype="U1")
+    outcomes_record = np.empty((int(shots), n_readout), dtype=np.int8)
+    for shot in range(int(shots)):
+        axes = local_rng.choice(axes_all, size=n_readout)
+        outcomes, probs = outcome_probabilities(rho, axes, strength)
+        sampled = outcomes[int(local_rng.choice(len(outcomes), p=probs))]
+        axes_record[shot] = axes
+        outcomes_record[shot] = np.asarray(sampled, dtype=np.int8)
+        for col, label in enumerate(labels):
+            value = 1.0
+            for qubit, pauli in label:
+                if str(axes[int(qubit)]) != str(pauli):
+                    value = 0.0
+                    break
+                value *= 3.0 * float(sampled[int(qubit)]) / strength
+            estimates[shot, col] = value
+    features = estimates.mean(axis=0)
+    if include_bias:
+        features = np.asarray([1.0, *features], dtype=float)
+    if return_raw:
+        return features, {"axes": axes_record, "outcomes": outcomes_record, "shot_estimates": estimates}
+    return features
 
 
 def sample_basis_schedules(

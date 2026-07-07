@@ -1,26 +1,17 @@
-"""Prethermal shadow reservoir API.
-
-This package is intentionally experimental. It is not imported from the
-top-level ``pyqres`` namespace and should be instantiated directly by users who
-want finite-shot classical-shadow reservoir features.
-"""
+"""Global-Floquet partial-shadow reservoir API."""
 
 from .config import (
-    FastDriveConfig,
-    InputWriteConfig,
-    PrethermalFloquetConfig,
-    PrethermalShadowConfig,
-    ShadowReadoutConfig,
-    TransducerConfig,
+    GlobalFloquetConfig,
+    InputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
 )
-from .reservoir import PrethermalShadowReservoir
+from .reservoir import GlobalFloquetPartialShadowReservoir
 
 __all__ = [
-    "InputWriteConfig",
-    "FastDriveConfig",
-    "PrethermalFloquetConfig",
-    "PrethermalShadowConfig",
-    "PrethermalShadowReservoir",
-    "ShadowReadoutConfig",
-    "TransducerConfig",
+    "GlobalFloquetConfig",
+    "GlobalFloquetPartialShadowReservoir",
+    "InputEncodingConfig",
+    "PartialShadowReadoutConfig",
+    "ReadoutResetConfig",
 ]
