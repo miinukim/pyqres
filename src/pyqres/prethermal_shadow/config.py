@@ -31,7 +31,14 @@ class GlobalFloquetConfig:
     random_jz: bool = True
     random_jxy: bool = True
     random_drive: bool = True
+    random_drive_sign: bool | None = None
     random_break: bool = True
+    h_range: tuple[float, float] = (0.8, 1.2)
+    jz_range: tuple[float, float] = (0.5, 1.5)
+    jxy_range: tuple[float, float] = (0.5, 1.5)
+    drive_range: tuple[float, float] = (0.5, 1.5)
+    break_range: tuple[float, float] = (-1.0, 1.0)
+    parameter_draw_order: str = "grouped"
     seed: int = 0
     topology: str = "chain"
     include_mr_couplings: bool = True
@@ -47,6 +54,8 @@ class InputEncodingConfig:
     bias: float = 0.0
     random_beta: bool = True
     seed: int = 1
+    operator: str | None = None
+    normalize_operator: bool = True
 
 
 @dataclass(frozen=True)

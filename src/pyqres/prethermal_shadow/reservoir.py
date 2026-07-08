@@ -19,6 +19,7 @@ from .dynamics import (
     kron_all,
     partial_trace_memory_first,
     pauli_string,
+    parse_pauli_operator,
     project_density,
     step_duration,
     validate_floquet_config,
@@ -140,9 +141,22 @@ class GlobalFloquetPartialShadowReservoir:
         self.drive_hamiltonian = build_drive_hamiltonian(floquet_config, self.drive_coeffs)
         self.u_floquet_step = build_step_unitary(floquet_config, self.h0, self.drive_hamiltonian)
 
-        self.input_qubits = _resolve_input_qubits(self.input_config, floquet_config)
-        self.input_axis = _validate_axis(self.input_config.axis, "input axis")
-        self.beta = _beta_array(self.input_config, len(self.input_qubits))
+        self.input_operator: np.ndarray | None = None
+        if self.input_config.operator is None:
+            self.input_qubits = _resolve_input_qubits(self.input_config, floquet_config)
+            self.input_axis = _validate_axis(self.input_config.axis, "input axis")
+            self.beta = _beta_array(self.input_config, len(self.input_qubits))
+        else:
+            if not isinstance(self.input_config.beta, (int, float, np.floating)):
+                raise ValueError("operator input encoding requires scalar beta.")
+            self.input_qubits = tuple()
+            self.input_axis = _validate_axis(self.input_config.axis, "input axis")
+            self.beta = np.asarray([float(self.input_config.beta)], dtype=float)
+            self.input_operator = parse_pauli_operator(
+                self.n_qubits,
+                str(self.input_config.operator),
+                normalize=bool(self.input_config.normalize_operator),
+            )
         self.pauli_labels = generate_pauli_labels(self.n_readout, int(self.shadow_config.pauli_k))
         self.feature_names = partial_shadow_feature_names(
             self.n_readout,
@@ -166,8 +180,10 @@ class GlobalFloquetPartialShadowReservoir:
         return density_plus(self.n_readout)
 
     def _input_unitary(self, u: float) -> np.ndarray:
-        out = np.eye(self.dim_total, dtype=complex)
         scale = float(u) + float(self.input_config.bias)
+        if self.input_operator is not None:
+            return la.expm(-1j * float(self.beta[0]) * scale * self.input_operator)
+        out = np.eye(self.dim_total, dtype=complex)
         for q, beta in zip(self.input_qubits, self.beta):
             generator = pauli_string(self.n_qubits, [(int(q), self.input_axis)])
             out = la.expm(-1j * float(beta) * scale * generator) @ out

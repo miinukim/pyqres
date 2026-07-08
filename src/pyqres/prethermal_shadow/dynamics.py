@@ -35,6 +35,60 @@ def pauli_string(n_qubits: int, placements: Sequence[tuple[int, str]]) -> np.nda
     return kron_all(ops)
 
 
+def parse_pauli_placements(spec: str) -> tuple[tuple[int, str], ...]:
+    """Parse one Pauli string like ``0:Z,2:X`` into placements."""
+
+    text = str(spec).strip()
+    if not text or text.upper() == "I":
+        return tuple()
+    placements = []
+    for part in text.split(","):
+        site_text, pauli_text = part.strip().split(":", 1)
+        pauli = pauli_text.strip().upper()
+        if pauli not in {"X", "Y", "Z"}:
+            raise ValueError(f"unsupported Pauli {pauli!r}")
+        placements.append((int(site_text), pauli))
+    return tuple(placements)
+
+
+def parse_pauli_operator(
+    n_qubits: int,
+    spec: str,
+    *,
+    normalize: bool = True,
+) -> np.ndarray:
+    """Parse sums of Pauli strings into a dense Hermitian operator.
+
+    Supported examples include ``0:Y``, ``0:Z,1:Z`` and
+    ``0.5*0:X + -1.2*2:Z``.
+    """
+
+    text = str(spec).strip()
+    dim = 2 ** int(n_qubits)
+    if not text or text.upper() == "I":
+        out = np.eye(dim, dtype=complex)
+    else:
+        out = np.zeros((dim, dim), dtype=complex)
+        for raw_term in text.replace("-", "+-").split("+"):
+            term = raw_term.strip()
+            if not term:
+                continue
+            if "*" in term:
+                coeff_text, pauli_text = term.split("*", 1)
+                coeff = float(coeff_text.strip())
+            else:
+                coeff = 1.0
+                pauli_text = term
+            out += coeff * pauli_string(int(n_qubits), parse_pauli_placements(pauli_text))
+    out = 0.5 * (out + out.conj().T)
+    if normalize:
+        norm2 = np.real_if_close(np.trace(out.conj().T @ out) / dim)
+        norm = float(np.sqrt(max(float(norm2), 0.0)))
+        if norm > 1e-15:
+            out = out / norm
+    return out
+
+
 def chain_edges(n_qubits: int, n_memory: int, include_mr_couplings: bool = True) -> tuple[tuple[int, int], ...]:
     edges = []
     for i in range(int(n_qubits) - 1):
@@ -42,6 +96,36 @@ def chain_edges(n_qubits: int, n_memory: int, include_mr_couplings: bool = True)
             continue
         edges.append((i, i + 1))
     return tuple(edges)
+
+
+def topology_edges(n_qubits: int, n_memory: int, topology: str, include_mr_couplings: bool = True) -> tuple[tuple[int, int], ...]:
+    key = str(topology).lower()
+    n = int(n_qubits)
+    n_mem = int(n_memory)
+    if key == "chain":
+        return chain_edges(n, n_mem, include_mr_couplings=include_mr_couplings)
+    if key == "all_to_all":
+        edges = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                crosses_mr = i < n_mem <= j
+                if include_mr_couplings or not crosses_mr:
+                    edges.append((i, j))
+        return tuple(edges)
+    raise ValueError("topology must be chain or all_to_all.")
+
+
+def _uniform_or_ones(rng: np.random.Generator, randomize: bool, bounds: tuple[float, float], size: int) -> np.ndarray:
+    if not randomize:
+        return np.ones(int(size), dtype=float)
+    low, high = (float(bounds[0]), float(bounds[1]))
+    if low > high:
+        raise ValueError(f"invalid random coefficient range {bounds!r}")
+    return rng.uniform(low, high, size=int(size)).astype(float)
+
+
+def _uniform_scalar_or_one(rng: np.random.Generator, randomize: bool, bounds: tuple[float, float]) -> float:
+    return float(_uniform_or_ones(rng, randomize, bounds, 1)[0])
 
 
 def validate_floquet_config(cfg: GlobalFloquetConfig) -> None:
@@ -63,22 +147,34 @@ def validate_floquet_config(cfg: GlobalFloquetConfig) -> None:
         raise ValueError("drive_axis must be x, y, or z.")
     if str(cfg.break_axis).lower() not in {"x", "y", "z"}:
         raise ValueError("break_axis must be x, y, or z.")
-    if cfg.topology != "chain":
-        raise ValueError("only topology='chain' is supported.")
+    if cfg.topology not in {"chain", "all_to_all"}:
+        raise ValueError("topology must be chain or all_to_all.")
+    if cfg.parameter_draw_order not in {"grouped", "operator_test"}:
+        raise ValueError("parameter_draw_order must be grouped or operator_test.")
 
 
 def generate_hamiltonian_parameters(cfg: GlobalFloquetConfig) -> dict[str, np.ndarray | tuple[tuple[int, int], ...]]:
     validate_floquet_config(cfg)
     rng = np.random.default_rng(int(cfg.seed))
     n = int(cfg.n_qubits)
-    edges = chain_edges(n, int(cfg.n_memory), bool(cfg.include_mr_couplings))
-    h = rng.uniform(0.8, 1.2, size=n) if cfg.random_h else np.ones(n)
-    jz = rng.uniform(0.5, 1.5, size=len(edges)) if cfg.random_jz else np.ones(len(edges))
-    jxy = rng.uniform(0.5, 1.5, size=len(edges)) if cfg.random_jxy else np.ones(len(edges))
-    drive = rng.uniform(0.5, 1.5, size=n) if cfg.random_drive else np.ones(n)
-    if cfg.random_drive:
-        drive *= rng.choice(np.array([-1.0, 1.0]), size=n)
-    break_coeffs = rng.uniform(-1.0, 1.0, size=n) if cfg.random_break else np.ones(n)
+    edges = topology_edges(n, int(cfg.n_memory), str(cfg.topology), bool(cfg.include_mr_couplings))
+    random_drive_sign = bool(cfg.random_drive if cfg.random_drive_sign is None else cfg.random_drive_sign)
+    h = _uniform_or_ones(rng, bool(cfg.random_h), cfg.h_range, n)
+    if cfg.parameter_draw_order == "operator_test":
+        jz = np.empty(len(edges), dtype=float)
+        jxy = np.empty(len(edges), dtype=float)
+        for edge_idx in range(len(edges)):
+            jz[edge_idx] = _uniform_scalar_or_one(rng, bool(cfg.random_jz), cfg.jz_range)
+            jxy[edge_idx] = _uniform_scalar_or_one(rng, bool(cfg.random_jxy), cfg.jxy_range)
+        signs = rng.choice(np.array([-1.0, 1.0]), size=n) if random_drive_sign else np.ones(n, dtype=float)
+        drive = signs * _uniform_or_ones(rng, bool(cfg.random_drive), cfg.drive_range, n)
+    else:
+        jz = _uniform_or_ones(rng, bool(cfg.random_jz), cfg.jz_range, len(edges))
+        jxy = _uniform_or_ones(rng, bool(cfg.random_jxy), cfg.jxy_range, len(edges))
+        drive = _uniform_or_ones(rng, bool(cfg.random_drive), cfg.drive_range, n)
+        if random_drive_sign:
+            drive *= rng.choice(np.array([-1.0, 1.0]), size=n)
+    break_coeffs = _uniform_or_ones(rng, bool(cfg.random_break), cfg.break_range, n)
     return {
         "edges": edges,
         "h": float(cfg.h_scale) * h.astype(float),
@@ -188,7 +284,10 @@ __all__ = [
     "kron_all",
     "partial_trace_memory_first",
     "pauli_string",
+    "parse_pauli_operator",
+    "parse_pauli_placements",
     "project_density",
     "step_duration",
+    "topology_edges",
     "validate_floquet_config",
 ]
