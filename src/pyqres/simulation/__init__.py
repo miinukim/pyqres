@@ -7,7 +7,13 @@ finite-shot trajectory or Qiskit execution.
 
 from pyqres.core import HamiltonianSpec, MeasurementControlConfig, PauliTerm, ReservoirParams
 
-from .channel_map import ChannelMapReservoir, ChannelMapReservoirConfig
+from .channel_map import (
+    ChannelMapReservoir,
+    ChannelMapReservoirConfig,
+    ObservableChannelMapReservoir,
+    ObservableChannelMapReservoirConfig,
+    parse_readout_observable,
+)
 from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
 from .hardware import HardwareTrajectoryReservoir, HardwareTrajectoryReservoirConfig
 
@@ -20,6 +26,9 @@ __all__ = [
     "HardwareTrajectoryReservoirConfig",
     "HamiltonianSpec",
     "MeasurementControlConfig",
+    "ObservableChannelMapReservoir",
+    "ObservableChannelMapReservoirConfig",
     "PauliTerm",
+    "parse_readout_observable",
     "ReservoirParams",
 ]

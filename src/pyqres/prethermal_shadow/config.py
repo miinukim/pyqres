@@ -60,9 +60,14 @@ class InputEncodingConfig:
 
 @dataclass(frozen=True)
 class PartialShadowReadoutConfig:
-    """Partial local Pauli-shadow feature extraction on readout qubits."""
+    """Partial local Pauli-shadow feature extraction.
+
+    ``feature_scope='readout'`` is the physical shadow readout path. ``memory``
+    and ``full`` are exact-expectation diagnostic scopes.
+    """
 
     pauli_k: int = 2
+    feature_scope: str = "readout"
     shots: int = 1024
     measurement_type: str = "projective"
     weak_strength: float = 1.0

@@ -78,6 +78,26 @@ def _low_weight_labels(n_qubits: int, pauli_k: int) -> list[tuple[tuple[int, str
     return labels
 
 
+def _feature_scope_key(scope: str) -> str:
+    key = str(scope).lower()
+    if key in {"memory", "readout", "full"}:
+        return key
+    raise ValueError("feature_scope must be one of: readout, memory, full.")
+
+
+def _scoped_feature_names(scope: str, n_qubits: int, pauli_k: int, include_bias: bool) -> list[str]:
+    key = _feature_scope_key(scope)
+    if key == "readout":
+        return partial_shadow_feature_names(n_qubits, pauli_k, include_bias=include_bias)
+    prefix = "m" if key == "memory" else "q"
+    names = []
+    for label in generate_pauli_labels(n_qubits, pauli_k):
+        names.append(" ".join(f"{pauli}_{prefix}{qubit}" for qubit, pauli in label))
+    if include_bias:
+        return ["bias", *names]
+    return names
+
+
 class GlobalFloquetPartialShadowReservoir:
     """Dense global-Floquet QRC with partial local Pauli-shadow readout."""
 
@@ -108,8 +128,15 @@ class GlobalFloquetPartialShadowReservoir:
         self.dim_total = 2**self.n_qubits
         self.delta_t = step_duration(floquet_config)
 
-        if int(self.shadow_config.pauli_k) < 1 or int(self.shadow_config.pauli_k) > self.n_readout:
-            raise ValueError("shadow pauli_k must lie in [1, n_readout].")
+        self.feature_scope = _feature_scope_key(self.shadow_config.feature_scope)
+        if self.feature_scope == "readout":
+            self.feature_n_qubits = self.n_readout
+        elif self.feature_scope == "memory":
+            self.feature_n_qubits = self.n_memory
+        else:
+            self.feature_n_qubits = self.n_qubits
+        if int(self.shadow_config.pauli_k) < 1 or int(self.shadow_config.pauli_k) > self.feature_n_qubits:
+            raise ValueError(f"shadow pauli_k must lie in [1, {self.feature_n_qubits}] for feature_scope='{self.feature_scope}'.")
         if int(self.shadow_config.shots) <= 0:
             raise ValueError("shadow shots must be positive.")
         if str(self.shadow_config.measurement_type).lower() not in {"projective", "weak"}:
@@ -118,6 +145,8 @@ class GlobalFloquetPartialShadowReservoir:
             raise ValueError("weak_strength must lie in (0, 1].")
         if self.shadow_config.basis_randomization != "local_pauli":
             raise ValueError("only basis_randomization='local_pauli' is supported.")
+        if self.feature_scope != "readout" and self.shadow_config.return_shadow_estimates and not self.shadow_config.exact_expectations:
+            raise ValueError("feature_scope='memory' or 'full' requires exact_expectations=true; finite-shot shadows are readout-only.")
         if not self.reset_config.reset_after_measurement or not self.reset_config.trace_readout_after_step:
             raise NotImplementedError("only trace/reset readout updates are implemented.")
         if self.reset_config.reset_state not in {"zero", "plus"}:
@@ -157,9 +186,10 @@ class GlobalFloquetPartialShadowReservoir:
                 str(self.input_config.operator),
                 normalize=bool(self.input_config.normalize_operator),
             )
-        self.pauli_labels = generate_pauli_labels(self.n_readout, int(self.shadow_config.pauli_k))
-        self.feature_names = partial_shadow_feature_names(
-            self.n_readout,
+        self.pauli_labels = generate_pauli_labels(self.feature_n_qubits, int(self.shadow_config.pauli_k))
+        self.feature_names = _scoped_feature_names(
+            self.feature_scope,
+            self.feature_n_qubits,
             int(self.shadow_config.pauli_k),
             include_bias=bool(self.shadow_config.include_bias),
         )
@@ -196,11 +226,14 @@ class GlobalFloquetPartialShadowReservoir:
         return project_density(rho_pre)
 
     def exact_features_from_state(self, rho_pre: np.ndarray) -> np.ndarray:
-        """Compute exact readout Pauli expectations from a pre-reset full state."""
+        """Compute exact Pauli expectations for the configured feature scope."""
 
-        rho_r = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+        if self.feature_scope == "full":
+            rho = project_density(rho_pre)
+        else:
+            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep=self.feature_scope)
         return exact_readout_expectations(
-            project_density(rho_r),
+            project_density(rho),
             self.pauli_labels,
             include_bias=bool(self.shadow_config.include_bias),
         )
@@ -208,6 +241,8 @@ class GlobalFloquetPartialShadowReservoir:
     def shadow_features_from_state(self, rho_pre: np.ndarray, shots: int) -> np.ndarray:
         """Simulate partial local Pauli shadow feature estimates on readout."""
 
+        if self.feature_scope != "readout":
+            raise ValueError("Finite-shot shadow feature estimates are only implemented for feature_scope='readout'.")
         rho_r = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
         result = sample_partial_shadow_features(
             project_density(rho_r),

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
+import re
 
 import numpy as np
 
-from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
+from .exact_qrc import ExactQRCModel, ExactQRCModelConfig, partial_trace_ancilla
 
 
 _PAULI_1Q = {
@@ -29,6 +30,85 @@ def _pauli_basis_matrices(n_qubits: int) -> tuple[np.ndarray, ...]:
     return tuple(_kron_all([_PAULI_1Q[label] for label in labels]) for labels in product(("I", "X", "Y", "Z"), repeat=n_qubits))
 
 
+def _partial_trace_system(op: np.ndarray, dim_system: int, dim_ancilla: int) -> np.ndarray:
+    """Trace out the first subsystem, interpreted as the memory/system register."""
+
+    return np.trace(op.reshape(dim_system, dim_ancilla, dim_system, dim_ancilla), axis1=0, axis2=2)
+
+
+def _pauli_placement_matrix(n_qubits: int, placements: list[tuple[int, str]]) -> np.ndarray:
+    ops = [_PAULI_1Q["I"] for _ in range(int(n_qubits))]
+    for site, pauli in placements:
+        if not (0 <= int(site) < int(n_qubits)):
+            raise ValueError(f"Observable site {site} is out of range for n_qubits={n_qubits}.")
+        key = str(pauli).upper()
+        if key not in {"X", "Y", "Z"}:
+            raise ValueError(f"Unsupported Pauli label '{pauli}'.")
+        ops[int(site)] = _PAULI_1Q[key]
+    return _kron_all(ops)
+
+
+_COEFF_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?:\s*\*\s*|\s+)(.+)$")
+_PAULI_TOKEN_RE = re.compile(r"^(?:([XYZxyz])(\d+)|(\d+):([XYZxyz]))$")
+
+
+def _parse_observable_term(text: str) -> tuple[float, str]:
+    match = _COEFF_RE.match(text.strip())
+    if match is None:
+        return 1.0, text.strip()
+    return float(match.group(1)), match.group(2).strip()
+
+
+def _parse_pauli_placements(text: str) -> list[tuple[int, str]]:
+    raw = text.strip()
+    if not raw or raw.upper() == "I":
+        return []
+    placements: list[tuple[int, str]] = []
+    for token in re.split(r"[\s,;*]+", raw):
+        if not token:
+            continue
+        match = _PAULI_TOKEN_RE.match(token)
+        if match is None:
+            raise ValueError(
+                f"Unsupported Pauli token '{token}'. Use forms like Z0, X1, or 0:Z."
+            )
+        if match.group(1) is not None:
+            pauli = match.group(1).upper()
+            site = int(match.group(2))
+        else:
+            site = int(match.group(3))
+            pauli = match.group(4).upper()
+        placements.append((site, pauli))
+    return placements
+
+
+def parse_readout_observable(n_qubits: int, spec: str, *, normalize: bool = False) -> np.ndarray:
+    """Parse a Hermitian Pauli-sum observable on the readout register.
+
+    Supported examples include ``Z0``, ``0:Z``, ``Z0 Z1`` and
+    ``0.5*Z0 + 0.5*Z1``.
+    """
+
+    dim = 2 ** int(n_qubits)
+    text = str(spec).strip()
+    if not text:
+        raise ValueError("Observable spec must not be empty.")
+    out = np.zeros((dim, dim), dtype=complex)
+    for raw_term in re.sub(r"(?<![eE])-", "+-", text).split("+"):
+        term = raw_term.strip()
+        if not term:
+            continue
+        coeff, pauli_text = _parse_observable_term(term)
+        out += coeff * _pauli_placement_matrix(int(n_qubits), _parse_pauli_placements(pauli_text))
+    out = 0.5 * (out + out.conj().T)
+    if normalize:
+        norm2 = np.real_if_close(np.trace(out.conj().T @ out) / dim)
+        norm = float(np.sqrt(max(float(norm2), 0.0)))
+        if norm > 1e-15:
+            out = out / norm
+    return out
+
+
 @dataclass
 class ChannelMapReservoirConfig(ExactQRCModelConfig):
     """Configuration for expectation-value features from the exact channel."""
@@ -37,6 +117,15 @@ class ChannelMapReservoirConfig(ExactQRCModelConfig):
     use_shot_noise: bool = False
     shots: int = 4096
     init_state: str = "maximally_mixed"  # "maximally_mixed" or "zero"
+
+
+@dataclass
+class ObservableChannelMapReservoirConfig(ChannelMapReservoirConfig):
+    """Configuration for explicit observable features on a partial register."""
+
+    observables: tuple[str, ...] = ("Z0",)
+    normalize_observables: bool = False
+    observable_register: str = "system"  # "system"/"memory" or "ancilla"/"readout"
 
 
 class ChannelMapReservoir:
@@ -57,8 +146,8 @@ class ChannelMapReservoir:
         self.rng = np.random.default_rng(cfg.seed)
         self._fixed_point_cache: np.ndarray | None = None
         self._ptm_cache: dict[float, np.ndarray] = {}
-        self._memory_basis = _pauli_basis_matrices(self.nS)
-        self._memory_basis_stack = np.stack(self._memory_basis, axis=0)
+        self._memory_basis: tuple[np.ndarray, ...] | None = None
+        self._memory_basis_stack: np.ndarray | None = None
         self.reset()
 
     def reset(self, rhoS0: np.ndarray | None = None) -> None:
@@ -89,6 +178,9 @@ class ChannelMapReservoir:
         if cached is not None:
             return cached.copy()
 
+        if self._memory_basis is None or self._memory_basis_stack is None:
+            self._memory_basis = _pauli_basis_matrices(self.nS)
+            self._memory_basis_stack = np.stack(self._memory_basis, axis=0)
         outputs = np.stack([self.channel(key, basis_op) for basis_op in self._memory_basis], axis=0)
         transfer = np.einsum("mab,nab->mn", self._memory_basis_stack.conj(), outputs, optimize=True) / self.core.dim_system
         if not np.isfinite(transfer).all():
@@ -150,3 +242,67 @@ class ChannelMapReservoir:
         """Scikit-style alias used by the generic experiment API."""
 
         return self.run_stream(inputs)
+
+
+class ObservableChannelMapReservoir(ChannelMapReservoir):
+    """Exact reset reservoir with explicit partial-register observables.
+
+    The recurrent state is still only the reduced system density matrix. System
+    observables are evaluated on the post-measurement reduced memory state,
+    matching the memory-observable readout used by the dimension/STM baseline.
+    Ancilla/readout observables are evaluated on the pre-measurement ancilla
+    marginal, since the ancilla is reset after the measurement protocol.
+    """
+
+    def __init__(self, cfg: ObservableChannelMapReservoirConfig):
+        self.observable_specs = tuple(str(obs) for obs in cfg.observables)
+        if not self.observable_specs:
+            raise ValueError("At least one readout observable is required.")
+        super().__init__(cfg)
+        self.cfg: ObservableChannelMapReservoirConfig
+        register = str(cfg.observable_register).lower()
+        if register in {"system", "memory"}:
+            self.observable_register = "system"
+            n_observable_qubits = self.nS
+        elif register in {"ancilla", "readout"}:
+            self.observable_register = "ancilla"
+            n_observable_qubits = self.nA
+        else:
+            raise ValueError("observable_register must be one of: system, memory, ancilla, readout.")
+        self._readout_observables = tuple(
+            parse_readout_observable(
+                n_observable_qubits,
+                spec,
+                normalize=bool(cfg.normalize_observables),
+            )
+            for spec in self.observable_specs
+        )
+
+    def get_feature_names(self) -> list[str]:
+        names = [f"obs:{spec}" for spec in self.observable_specs]
+        if self.cfg.include_bias:
+            return ["bias", *names]
+        return names
+
+    def step(self, u: float) -> np.ndarray:
+        """Advance one scalar input and return configured readout observables."""
+
+        if self.core.control.post_measurement_mode != "reset":
+            raise NotImplementedError("ObservableChannelMapReservoir requires post_measurement_mode='reset'.")
+        joint = np.kron(self.rhoS, self.core.ancilla_reset_density)
+        evolved = self.core.evolve_joint(joint, float(u))
+        _, next_joint = self.core.apply_measurement_protocol_exact(evolved)
+        rho_system = partial_trace_ancilla(next_joint, self.core.dim_system, self.core.dim_ancilla)
+        if self.observable_register == "system":
+            observable_state = rho_system
+        else:
+            observable_state = _partial_trace_system(evolved, self.core.dim_system, self.core.dim_ancilla)
+        features = np.asarray(
+            [float(np.real_if_close(np.trace(obs @ observable_state))) for obs in self._readout_observables],
+            dtype=float,
+        )
+        self.rhoS = rho_system
+        self.rhoSE = np.kron(self.rhoS, self.core.ancilla_reset_density)
+        if self.cfg.include_bias:
+            return np.concatenate([[1.0], features])
+        return features
