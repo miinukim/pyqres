@@ -12,7 +12,7 @@ memory-observable readout.
 from typing import Any
 
 from pyqres.core.reservoir_params import ReservoirParams
-from pyqres.core.specs import ReadoutSpec, ReservoirSpec
+from pyqres.core.specs import DynamicsSpec, ReadoutSpec, ReservoirSpec
 
 
 def ising_memory_readout(
@@ -93,6 +93,9 @@ def names() -> list[str]:
         "random_pauli",
         "randompauli",
         "random_pauli.memory_readout",
+        "prethermal_shadow",
+        "global_floquet_shadow",
+        "global_floquet.partial_shadow",
         "syk",
         "syk.memory_readout",
     ]
@@ -231,6 +234,21 @@ def get(name: str, **kwargs: object) -> ReservoirSpec:
     """Instantiate a named preset."""
 
     key = name.lower()
+    if key in {"prethermal_shadow", "global_floquet_shadow", "global_floquet.partial_shadow"}:
+        raw = dict(kwargs)
+        n_system = raw.pop("n_system", raw.pop("n_memory", None))
+        n_ancilla = raw.pop("n_ancilla", raw.pop("n_readout", None))
+        seed = int(raw.pop("seed", 17462))
+        return ReservoirSpec(
+            family=key,
+            preset=key,
+            source_kind="preset",
+            n_system=None if n_system is None else int(n_system),
+            n_ancilla=None if n_ancilla is None else int(n_ancilla),
+            seed=seed,
+            dynamics=DynamicsSpec(kind="preset", name=key),
+            model_kwargs=raw,
+        )
     if key in {"ising", "ising.memory_readout"}:
         return ising_memory_readout(**kwargs)
     if key in {"random_pauli", "randompauli", "random_pauli.memory_readout"}:

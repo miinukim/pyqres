@@ -1,8 +1,10 @@
 """Configuration dataclasses for Qiskit-backed reservoirs."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
+
 import numpy as np
 
 from pyqres.core.control import MeasurementControlConfig
@@ -31,6 +33,11 @@ SimulatorMethodType = Literal[
     "tensor_network",
 ]
 SimulatorDeviceType = Literal["automatic", "CPU", "GPU"]
+
+
+ONE_QUBIT_NOISE_GATES = ("rx", "rz", "x", "sx", "id", "u", "u3", "u2", "u1")
+TWO_QUBIT_NOISE_GATES = ("cx", "cz", "rzz", "swap")
+
 
 @dataclass
 class NoiseConfig:
@@ -71,19 +78,20 @@ class NoiseConfig:
             ph_err = phase_damping_error(p_ph)
             combined = amp_err.compose(ph_err)
 
-            for g in ["rx", "rz", "x", "sx", "id", "u", "u3", "u2", "u1"]:
-                nm.add_all_qubit_quantum_error(combined, g)
+            for gate in ONE_QUBIT_NOISE_GATES:
+                nm.add_all_qubit_quantum_error(combined, gate)
 
         if self.use_depolarizing:
             if self.p_depol_1q > 0:
                 dep1 = depolarizing_error(self.p_depol_1q, 1)
-                for g in ["rx", "rz", "x", "sx", "id", "u", "u3", "u2", "u1"]:
-                    nm.add_all_qubit_quantum_error(dep1, g)
+                for gate in ONE_QUBIT_NOISE_GATES:
+                    nm.add_all_qubit_quantum_error(dep1, gate)
             if self.p_depol_2q > 0:
                 dep2 = depolarizing_error(self.p_depol_2q, 2)
-                for g in ["cx", "cz", "rzz", "swap"]:
-                    nm.add_all_qubit_quantum_error(dep2, g)
+                for gate in TWO_QUBIT_NOISE_GATES:
+                    nm.add_all_qubit_quantum_error(dep2, gate)
         return nm
+
 
 @dataclass
 class QRCConfig:

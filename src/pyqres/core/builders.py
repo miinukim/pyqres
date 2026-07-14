@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """High-level reservoir construction helpers."""
 
+from dataclasses import fields
 from typing import Any, Mapping
 
 import numpy as np
@@ -24,12 +25,6 @@ def _select_observable_specs(model: Any, readout: ReadoutSpec) -> list[str]:
             raise ValueError(f"observable count {count} outside valid range [1, {len(specs)}]")
         specs = specs[:count]
     return list(dict.fromkeys(specs))
-
-
-def _preset_key(spec: ReservoirSpec) -> str:
-    from pyqres import presets
-
-    return presets.preset_key(spec)
 
 
 def build_dimension_model(spec: ReservoirSpec) -> Any:
@@ -122,6 +117,122 @@ def build_qiskit_hamiltonian_artifacts(spec: ReservoirSpec) -> dict[str, Any]:
     }
 
 
+_PRETHERMAL_PRESETS = {"prethermal_shadow", "global_floquet_shadow", "global_floquet.partial_shadow"}
+
+
+def _preset_key(spec: ReservoirSpec) -> str:
+    return str(spec.dynamics.name or spec.preset or spec.family or "").lower()
+
+
+def _dataclass_kwargs(cls: type, values: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {field.name for field in fields(cls)}
+    unknown = set(values) - allowed
+    if unknown:
+        raise ValueError(f"Unknown {cls.__name__} fields: {sorted(unknown)}")
+    return {key: value for key, value in values.items() if key in allowed}
+
+
+def _build_prethermal_shadow_reservoir(spec: ReservoirSpec) -> Any:
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        GlobalFloquetPartialShadowReservoir,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        ReadoutResetConfig,
+    )
+
+    model_kwargs = dict(spec.model_kwargs)
+    floquet = dict(model_kwargs.pop("floquet", {}))
+    shadow = dict(model_kwargs.pop("shadow", {}))
+    reset = dict(model_kwargs.pop("reset", {}))
+    simulator = dict(model_kwargs.pop("simulator", {}))
+    if model_kwargs:
+        floquet.update(model_kwargs)
+
+    floquet.setdefault("n_memory", spec.system_qubits)
+    floquet.setdefault("n_readout", spec.ancilla_qubits)
+    floquet.setdefault("n_qubits", spec.system_qubits + spec.ancilla_qubits)
+    floquet.setdefault("seed", int(spec.seed))
+    if "omega" not in floquet:
+        raise ValueError("prethermal_shadow preset requires floquet.omega.")
+    if "n_cycles_per_step" not in floquet:
+        raise ValueError("prethermal_shadow preset requires floquet.n_cycles_per_step.")
+
+    encoding = dict(spec.encoding.parameters)
+    if spec.encoding.targets:
+        encoding.setdefault("input_qubits", tuple(spec.encoding.targets))
+    elif "input_qubits" not in encoding:
+        encoding.setdefault("input_qubits", "memory")
+    if spec.encoding.operator is not None:
+        encoding.setdefault("axis", str(spec.encoding.operator).lower())
+    encoding.setdefault("beta", float(spec.encoding.scale))
+    encoding.setdefault("bias", float(spec.encoding.bias))
+
+    shadow.setdefault("include_bias", bool(spec.readout.include_bias))
+    shadow.setdefault("shots", int(spec.readout.shots))
+
+    return GlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(**_dataclass_kwargs(GlobalFloquetConfig, floquet)),
+        InputEncodingConfig(**_dataclass_kwargs(InputEncodingConfig, encoding)),
+        PartialShadowReadoutConfig(**_dataclass_kwargs(PartialShadowReadoutConfig, shadow)),
+        ReadoutResetConfig(**_dataclass_kwargs(ReadoutResetConfig, reset)),
+        **simulator,
+    )
+
+
+def _hamiltonian_backend_kwargs(spec: ReservoirSpec) -> dict[str, Any]:
+    readout = spec.readout
+    params = build_hamiltonian_params(spec)
+    return {
+        "n_system": spec.system_qubits,
+        "n_ancilla": spec.ancilla_qubits,
+        "tau": float(spec.tau),
+        "input_scale": float(spec.input_scale),
+        "include_bias": bool(readout.include_bias),
+        "init_state": str(readout.init_state),
+        "shots": int(readout.shots),
+        "H0_hamiltonian": params["H0_hamiltonian"],
+        "H1_hamiltonian": params["H1_hamiltonian"],
+        "seed": int(spec.seed),
+    }
+
+
+def _qiskit_base_kwargs(spec: ReservoirSpec) -> dict[str, Any]:
+    readout = spec.readout
+    return {
+        "n_system": spec.system_qubits,
+        "n_ancilla": spec.ancilla_qubits,
+        "tau": float(spec.tau),
+        "input_scale": float(spec.input_scale),
+        "seed": int(spec.seed),
+        "include_bias": bool(readout.include_bias),
+        "shots": int(readout.shots),
+    }
+
+
+def _build_qiskit_reservoir(spec: ReservoirSpec) -> Any:
+    from pyqres.qiskit import QRCConfig, QRCReservoir
+
+    circuit_kwargs = dict(spec.circuit_kwargs)
+    qiskit_kwargs = {**_qiskit_base_kwargs(spec), **dict(spec.qiskit_kwargs)}
+    if spec.source_kind.lower() == "circuit":
+        if "circuit" not in spec.runtime:
+            raise ValueError("Circuit reservoirs require a runtime circuit object.")
+        circuit_kwargs.pop("reservoir_type", None)
+        circuit_kwargs.pop("reservoir_circuit", None)
+        qiskit_kwargs.update(
+            {
+                "reservoir_type": "custom_circuit",
+                "reservoir_circuit": spec.runtime["circuit"],
+            }
+        )
+    else:
+        qiskit_kwargs.update(build_qiskit_hamiltonian_artifacts(spec))
+
+    qiskit_kwargs.update(circuit_kwargs)
+    return QRCReservoir(QRCConfig(**qiskit_kwargs))
+
+
 def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     """Compile a ReservoirSpec into an executable reservoir."""
 
@@ -131,6 +242,8 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
         return spec.runtime["reservoir"]
 
     backend_key = backend.lower()
+    if spec.source_kind.lower() == "preset" and _preset_key(spec) in _PRETHERMAL_PRESETS:
+        return _build_prethermal_shadow_reservoir(spec)
     if backend_key in {"exact", "dense"} and spec.readout.mode in {"memory_observables", "observables"}:
         backend_key = "memory_observable"
     readout = spec.readout
@@ -139,40 +252,17 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
     if backend_key in {"exact", "channel_map"}:
         from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
 
-        params = build_hamiltonian_params(spec)
+        kwargs = _hamiltonian_backend_kwargs(spec)
         return ChannelMapReservoir(
             ChannelMapReservoirConfig(
-                n_system=spec.system_qubits,
-                n_ancilla=spec.ancilla_qubits,
-                tau=float(spec.tau),
-                input_scale=float(spec.input_scale),
-                include_bias=bool(readout.include_bias),
                 use_shot_noise=bool(readout.use_shot_noise),
-                shots=int(readout.shots),
-                init_state=str(readout.init_state),
-                H0_hamiltonian=params["H0_hamiltonian"],
-                H1_hamiltonian=params["H1_hamiltonian"],
-                seed=int(spec.seed),
+                **kwargs,
             )
         )
     if backend_key in {"hardware", "hardware_trajectory"}:
         from pyqres.simulation import HardwareTrajectoryReservoir, HardwareTrajectoryReservoirConfig
 
-        params = build_hamiltonian_params(spec)
-        return HardwareTrajectoryReservoir(
-            HardwareTrajectoryReservoirConfig(
-                n_system=spec.system_qubits,
-                n_ancilla=spec.ancilla_qubits,
-                tau=float(spec.tau),
-                input_scale=float(spec.input_scale),
-                include_bias=bool(readout.include_bias),
-                init_state=str(readout.init_state),
-                shots=int(readout.shots),
-                H0_hamiltonian=params["H0_hamiltonian"],
-                H1_hamiltonian=params["H1_hamiltonian"],
-                seed=int(spec.seed),
-            )
-        )
+        return HardwareTrajectoryReservoir(HardwareTrajectoryReservoirConfig(**_hamiltonian_backend_kwargs(spec)))
     if backend_key in {"memory_observable", "dim"}:
         from pyqres.dim import MemoryObservableStreamingReservoir
 
@@ -186,58 +276,15 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
             init_state=str(readout.init_state),
         )
     if backend_key == "qiskit":
-        from pyqres.qiskit import QRCConfig, QRCReservoir
-
-        circuit_kwargs = dict(spec.circuit_kwargs)
-        qiskit_kwargs_from_spec = dict(spec.qiskit_kwargs)
-        if spec.source_kind.lower() == "circuit":
-            if "circuit" not in spec.runtime:
-                raise ValueError("Circuit reservoirs require a runtime circuit object.")
-            circuit_kwargs.pop("reservoir_type", None)
-            circuit_kwargs.pop("reservoir_circuit", None)
-            qiskit_kwargs = {
-                "n_system": spec.system_qubits,
-                "n_ancilla": spec.ancilla_qubits,
-                "tau": float(spec.tau),
-                "input_scale": float(spec.input_scale),
-                "seed": int(spec.seed),
-                "include_bias": bool(readout.include_bias),
-                "shots": int(readout.shots),
-                "reservoir_type": "custom_circuit",
-                "reservoir_circuit": spec.runtime["circuit"],
-            }
-            qiskit_kwargs.update(qiskit_kwargs_from_spec)
-            qiskit_kwargs.update(circuit_kwargs)
-            return QRCReservoir(
-                QRCConfig(**qiskit_kwargs)
-            )
-
-        artifacts = build_qiskit_hamiltonian_artifacts(spec)
-        qiskit_kwargs = {
-            "n_system": spec.system_qubits,
-            "n_ancilla": spec.ancilla_qubits,
-            "tau": float(spec.tau),
-            "input_scale": float(spec.input_scale),
-            "seed": int(spec.seed),
-            "include_bias": bool(readout.include_bias),
-            "shots": int(readout.shots),
-        }
-        qiskit_kwargs.update(artifacts)
-        qiskit_kwargs.update(qiskit_kwargs_from_spec)
-        qiskit_kwargs.update(circuit_kwargs)
-        return QRCReservoir(
-            QRCConfig(**qiskit_kwargs)
-        )
+        return _build_qiskit_reservoir(spec)
     raise ValueError(f"Unsupported backend '{backend}'")
 
 
 def run(reservoir: Any, inputs: InputSequence) -> np.ndarray:
     """Run any pyqres-compatible reservoir on a stream."""
 
-    if hasattr(reservoir, "run"):
-        return np.asarray(reservoir.run(inputs), dtype=float)
-    if hasattr(reservoir, "run_stream"):
-        return np.asarray(reservoir.run_stream(inputs), dtype=float)
-    if hasattr(reservoir, "transform"):
-        return np.asarray(reservoir.transform(inputs), dtype=float)
+    for method_name in ("run", "run_stream", "transform"):
+        method = getattr(reservoir, method_name, None)
+        if method is not None:
+            return np.asarray(method(inputs), dtype=float)
     raise TypeError("reservoir must expose transform, run_stream, or run")

@@ -50,6 +50,18 @@ def _kron_all(ops: Sequence[np.ndarray]) -> np.ndarray:
     return out
 
 
+def _pauli_label(n_qubits: int, term: PauliTerm) -> str:
+    labels = ["I"] * int(n_qubits)
+    for site, pauli in term.operators:
+        if not (0 <= int(site) < int(n_qubits)):
+            raise ValueError(f"Pauli term site {site} is out of range for n_qubits={n_qubits}.")
+        pauli = str(pauli).upper()
+        if pauli not in PAULI_1Q:
+            raise ValueError(f"Unsupported Pauli label '{pauli}'.")
+        labels[int(site)] = pauli
+    return "".join(labels)
+
+
 def normalize_pauli_term(term: PauliTerm | tuple[Any, Any] | Mapping[str, Any]) -> PauliTerm:
     """Accept PauliTerm, tuple, or dict input and normalize to PauliTerm."""
 
@@ -67,14 +79,7 @@ def pauli_term_matrix(n_qubits: int, term: PauliTerm | tuple[Any, Any] | Mapping
     """Convert one Pauli term into a dense matrix on n_qubits."""
 
     normalized = normalize_pauli_term(term)
-    labels = ["I"] * int(n_qubits)
-    for site, pauli in normalized.operators:
-        if not (0 <= int(site) < int(n_qubits)):
-            raise ValueError(f"Pauli term site {site} is out of range for n_qubits={n_qubits}.")
-        pauli = str(pauli).upper()
-        if pauli not in PAULI_1Q:
-            raise ValueError(f"Unsupported Pauli label '{pauli}'.")
-        labels[int(site)] = pauli
+    labels = _pauli_label(n_qubits, normalized)
     return complex(normalized.coefficient) * _kron_all([PAULI_1Q[label] for label in labels])
 
 
@@ -104,15 +109,7 @@ def pauli_terms_to_labels(
     normalized_terms = []
     for term in terms:
         normalized = normalize_pauli_term(term)
-        labels = ["I"] * int(n_qubits)
-        for site, pauli in normalized.operators:
-            if not (0 <= int(site) < int(n_qubits)):
-                raise ValueError(f"Pauli term site {site} is out of range for n_qubits={n_qubits}.")
-            pauli = str(pauli).upper()
-            if pauli not in PAULI_1Q:
-                raise ValueError(f"Unsupported Pauli label '{pauli}'.")
-            labels[int(site)] = pauli
-        normalized_terms.append(("".join(labels), complex(normalized.coefficient)))
+        normalized_terms.append((_pauli_label(n_qubits, normalized), complex(normalized.coefficient)))
     return tuple(normalized_terms)
 
 
@@ -348,6 +345,15 @@ class ReservoirParams:
             raise ValueError(f"{name} must be Hermitian.")
         return out
 
+    def _metadata(self, hamiltonian_kind: str) -> dict[str, Any]:
+        return {
+            "tau": float(self.tau),
+            "n_system": self.n_system,
+            "n_ancilla": self.n_ancilla,
+            "seed": self.seed,
+            "hamiltonian_kind": hamiltonian_kind,
+        }
+
     def _generate_matrix_hamiltonian(self) -> dict:
         h0 = self.h0_hamiltonian or HamiltonianSpec.from_matrix_like(self.n_qubits(), self.h0_matrix)
         h1 = self.h1_hamiltonian or HamiltonianSpec.from_matrix_like(self.n_qubits(), self.h1_matrix)
@@ -356,11 +362,7 @@ class ReservoirParams:
             "H1_hamiltonian": h1,
             "H0_matrix": self.h0_matrix,
             "H1_matrix": self.h1_matrix,
-            "tau": float(self.tau),
-            "n_system": self.n_system,
-            "n_ancilla": self.n_ancilla,
-            "seed": self.seed,
-            "hamiltonian_kind": "matrix",
+            **self._metadata("matrix"),
         }
 
     def _generate_pauli_terms_hamiltonian(self) -> dict:
@@ -371,11 +373,7 @@ class ReservoirParams:
             "H1_hamiltonian": h1,
             "H0_matrix": None,
             "H1_matrix": None,
-            "tau": float(self.tau),
-            "n_system": self.n_system,
-            "n_ancilla": self.n_ancilla,
-            "seed": self.seed,
-            "hamiltonian_kind": "pauli_terms",
+            **self._metadata("pauli_terms"),
         }
 
     def _ising_hamiltonian_specs(
@@ -432,9 +430,5 @@ class ReservoirParams:
             "H1_hamiltonian": h1,
             "H0_matrix": None,
             "H1_matrix": None,
-            "tau": float(self.tau),
-            "n_system": self.n_system,
-            "n_ancilla": self.n_ancilla,
-            "seed": self.seed,
-            "hamiltonian_kind": "ising",
+            **self._metadata("ising"),
         }

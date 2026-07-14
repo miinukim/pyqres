@@ -1,7 +1,9 @@
 """Qiskit circuit implementation of a streaming quantum reservoir."""
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from typing import Any, Optional, Sequence
+
 import numpy as np
 
 from .config import QRCConfig
@@ -117,6 +119,20 @@ class QRCReservoir:
         else:
             raise ValueError(f"Unknown encoding: {cfg.encoding}")
 
+    def _random_pair_layer(self, qc: "QuantumCircuit", n_qubits: int, start: int) -> None:
+        perm = np.arange(n_qubits)
+        self.rng.shuffle(perm)
+        for idx in range(start, n_qubits - 1, 2):
+            control = int(perm[idx])
+            target = int(perm[idx + 1])
+            qc.cx(control, target)
+            qc.rz(float(self.rng.uniform(-np.pi, np.pi)), target)
+            qc.cx(control, target)
+
+    def _random_local_rz_layer(self, qc: "QuantumCircuit", n_qubits: int) -> None:
+        for qubit in range(n_qubits):
+            qc.rz(float(self.rng.uniform(-np.pi, np.pi)), qubit)
+
     def _apply_reservoir_unitary(self, qc: "QuantumCircuit") -> None:
         """Append one reservoir-evolution block using the configured ansatz."""
 
@@ -126,14 +142,8 @@ class QRCReservoir:
             self._apply_custom_circuit(qc)
         elif cfg.reservoir_type == "random_cx_rz":
             for _ in range(cfg.depth_per_step):
-                # Shuffle pairings at each layer so the random-CX reservoir does
-                # not repeatedly couple the same neighboring indices.
-                perm = np.arange(n); self.rng.shuffle(perm)
-                pairs = [(perm[k], perm[k+1]) for k in range(0, n-1, 2)]
-                for a, b in pairs:
-                    qc.cx(a, b); qc.rz(float(self.rng.uniform(-np.pi, np.pi)), b); qc.cx(a, b)
-                for q in range(n):
-                    qc.rz(float(self.rng.uniform(-np.pi, np.pi)), q)
+                self._random_pair_layer(qc, n, start=0)
+                self._random_local_rz_layer(qc, n)
         else:
             raise ValueError(f"Unknown reservoir_type: {cfg.reservoir_type}")
 
@@ -183,7 +193,7 @@ class QRCReservoir:
         else:
             raise ValueError(f"Unknown ancilla_pattern: {cfg.ancilla_pattern}")
 
-    def build_streaming_circuit(self, inputs: Sequence[float], measure_system: bool = True) -> Tuple["QuantumCircuit", List[int], List[int]]:
+    def build_streaming_circuit(self, inputs: Sequence[float], measure_system: bool = True) -> tuple["QuantumCircuit", list[int], list[int]]:
         """Build the full multi-time-step circuit and record bit allocation.
 
         The returned sys_bits_per_step and anc_bits_per_step arrays are used
@@ -217,7 +227,7 @@ class QRCReservoir:
                 for k in range(nS):
                     qc.measure(k, cidx + k)
                 cidx += nS
-        return qc, [sys_bits]*T, [anc_bits]*T
+        return qc, [sys_bits] * T, [anc_bits] * T
 
     def build_executable_circuit(
         self,
@@ -248,40 +258,49 @@ class QRCReservoir:
         return 1 if bitstring[-(idx + 1)] == "1" else 0
 
     @classmethod
-    def _z_expectation_from_counts(cls, counts: Dict[str, int], shots: int, clbit_index: int) -> float:
+    def _z_expectation_from_counts(cls, counts: dict[str, int], shots: int, clbit_index: int) -> float:
         """Estimate a single Z expectation value from a counts dictionary."""
 
         acc = 0.0
-        for s, c in counts.items():
-            b = cls._bit_at_from_right(s, clbit_index)
-            acc += c * (1.0 if b == 0 else -1.0)
+        for bitstring, count in counts.items():
+            bit = cls._bit_at_from_right(bitstring, clbit_index)
+            acc += count * (1.0 if bit == 0 else -1.0)
         return acc / float(shots)
 
     @classmethod
-    def _z_vector_from_counts(cls, counts: Dict[str, int], shots: int, start: int, n: int) -> np.ndarray:
+    def _z_vector_from_counts(cls, counts: dict[str, int], shots: int, start: int, n: int) -> np.ndarray:
         z = np.zeros(n, dtype=float)
         for i in range(n):
             z[i] = cls._z_expectation_from_counts(counts, shots, clbit_index=start + i)
         return z
 
-    def features_from_counts(self, counts: Dict[str, int], sys_bits_per_step: List[int], anc_bits_per_step: List[int]) -> np.ndarray:
+    def _step_features_from_counts(self, counts: dict[str, int], offset: int, sys_bits: int, anc_bits: int) -> tuple[np.ndarray, int]:
+        per_step: list[float] = []
+        if self.cfg.readout == "z_local_plus_anc" and anc_bits > 0:
+            per_step.extend(self._z_vector_from_counts(counts, self.cfg.shots, offset, anc_bits).tolist())
+        offset += anc_bits
+        if sys_bits > 0:
+            per_step.extend(self._z_vector_from_counts(counts, self.cfg.shots, offset, sys_bits).tolist())
+        offset += sys_bits
+        return np.asarray(per_step, dtype=float), offset
+
+    def features_from_counts(self, counts: dict[str, int], sys_bits_per_step: list[int], anc_bits_per_step: list[int]) -> np.ndarray:
         """Convert flat Qiskit counts into a dense feature matrix."""
 
         cfg = self.cfg
         T = len(sys_bits_per_step)
+        if T == 0:
+            return np.empty((0, int(bool(cfg.include_bias))), dtype=float)
         feats = []
         offset = 0
         for t in range(T):
-            a_bits = anc_bits_per_step[t]
-            s_bits = sys_bits_per_step[t]
-            per = []
-            if cfg.readout == "z_local_plus_anc" and a_bits > 0:
-                per.extend(self._z_vector_from_counts(counts, cfg.shots, offset, a_bits).tolist())
-            offset += a_bits
-            if s_bits > 0:
-                per.extend(self._z_vector_from_counts(counts, cfg.shots, offset, s_bits).tolist())
-            offset += s_bits
-            feats.append(np.array(per, dtype=float))
+            row, offset = self._step_features_from_counts(
+                counts,
+                offset,
+                sys_bits=sys_bits_per_step[t],
+                anc_bits=anc_bits_per_step[t],
+            )
+            feats.append(row)
         X = np.vstack(feats)
         if cfg.include_bias:
             X = np.hstack([np.ones((T, 1)), X])
@@ -289,8 +308,26 @@ class QRCReservoir:
             raise FloatingPointError("Non-finite reservoir features X; reduce shots/noise or check circuit size.")
         return X
 
-    def run_stream(self, inputs: Sequence[float], backend: Optional["AerSimulator"]=None,
-                   noise_model: Optional["NoiseModel"]=None, seed_simulator: int = 123) -> np.ndarray:
+    def _default_backend_options(self, noise_model: Optional["NoiseModel"], seed_simulator: int) -> dict[str, Any]:
+        cfg = self.cfg
+        backend_options: dict[str, Any] = {
+            "method": cfg.simulator_method,
+            "seed_simulator": seed_simulator,
+            **dict(cfg.aer_options),
+        }
+        if cfg.simulator_device != "automatic":
+            backend_options["device"] = cfg.simulator_device
+        if noise_model is not None:
+            backend_options["noise_model"] = noise_model
+        return backend_options
+
+    def run_stream(
+        self,
+        inputs: Sequence[float],
+        backend: Optional["AerSimulator"] = None,
+        noise_model: Optional["NoiseModel"] = None,
+        seed_simulator: int = 123,
+    ) -> np.ndarray:
         """Execute a streaming circuit and return time-indexed readout features."""
 
         cfg = self.cfg
@@ -300,16 +337,7 @@ class QRCReservoir:
                 raise ImportError("qiskit-aer is required for AerSimulator.")
             if noise_model is None and cfg.use_noise_model:
                 noise_model = cfg.noise.to_noise_model()
-            backend_options: dict[str, Any] = {
-                "method": cfg.simulator_method,
-                "seed_simulator": seed_simulator,
-                **dict(cfg.aer_options),
-            }
-            if cfg.simulator_device != "automatic":
-                backend_options["device"] = cfg.simulator_device
-            if noise_model is not None:
-                backend_options["noise_model"] = noise_model
-            backend = AerSimulator(**backend_options)
+            backend = AerSimulator(**self._default_backend_options(noise_model, seed_simulator))
         if transpile is None:
             raise ImportError("qiskit is required to transpile circuits for Aer execution.")
         qc = transpile(

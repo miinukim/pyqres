@@ -166,6 +166,24 @@ def _promoted_spec_updates(parameters: Mapping[str, Any]) -> dict[str, Any]:
     return updates
 
 
+def _prethermal_model_kwargs(raw: dict[str, Any], preset_name: str) -> dict[str, Any]:
+    if preset_name.lower() not in {"prethermal_shadow", "global_floquet_shadow", "global_floquet.partial_shadow"}:
+        return {}
+    out: dict[str, Any] = {}
+    for source, target in {
+        "floquet": "floquet",
+        "prethermal": "floquet",
+        "shadow": "shadow",
+        "partial_shadow": "shadow",
+        "reset": "reset",
+        "readout_reset": "reset",
+        "simulator": "simulator",
+    }.items():
+        if source in raw:
+            out[target] = _as_mapping(raw.pop(source), name=source)
+    return out
+
+
 def _spec_from_parts(
     *,
     preset_name: str,
@@ -184,6 +202,7 @@ def _spec_from_parts(
     kind = dynamics.kind.lower()
     parameters = dict(dynamics.parameters)
     updates = _promoted_spec_updates(parameters)
+    preset_key = str(dynamics.name or preset_name).lower()
     if n_memory is not None:
         updates.update({"n_memory": int(n_memory), "n_system": int(n_memory)})
     if n_readout is not None:
@@ -209,6 +228,8 @@ def _spec_from_parts(
         spec_kwargs["source_kind"] = "preset"
         spec_kwargs["model_kwargs"] = {**parameters, **dict(model_kwargs)}
         spec_kwargs["hamiltonian_kwargs"] = dict(parameters)
+        if preset_key in {"prethermal_shadow", "global_floquet_shadow", "global_floquet.partial_shadow"}:
+            spec_kwargs["hamiltonian_kwargs"] = {}
     elif kind == "hamiltonian":
         spec_kwargs["hamiltonian_kwargs"] = parameters
     elif kind == "circuit":
@@ -253,6 +274,7 @@ class qresreservoir:
 
         tau = _pop_any(raw, ("tau",), None)
         model_cfg = _as_mapping(_pop_any(raw, ("model_kwargs", "model_params", "model_config"), None), name="model_kwargs")
+        model_cfg.update(_prethermal_model_kwargs(raw, preset_name))
         qiskit_cfg = _as_mapping(_pop_any(raw, ("qiskit", "qiskit_kwargs", "simulator"), None), name="qiskit")
         readout = _readout_from_config(_pop_any(raw, ("readout",), None))
 

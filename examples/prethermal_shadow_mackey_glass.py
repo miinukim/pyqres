@@ -5,13 +5,6 @@ from __future__ import annotations
 import numpy as np
 
 import pyqres as qres
-from pyqres.prethermal_shadow import (
-    GlobalFloquetConfig,
-    GlobalFloquetPartialShadowReservoir,
-    InputEncodingConfig,
-    PartialShadowReadoutConfig,
-    ReadoutResetConfig,
-)
 
 
 def make_dataset():
@@ -27,12 +20,18 @@ def make_dataset():
 
 
 def main() -> None:
-    reservoir = GlobalFloquetPartialShadowReservoir(
-        GlobalFloquetConfig(n_qubits=5, n_memory=3, n_readout=2, omega=16.0, n_cycles_per_step=2, seed=23),
-        InputEncodingConfig(input_qubits="memory", axis="y", beta=0.08, seed=29),
-        PartialShadowReadoutConfig(pauli_k=2, shots=64, include_bias=True, measurement_type="projective", seed=31),
-        ReadoutResetConfig(reset_state="zero"),
-        seed_simulator=37,
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "preset": "prethermal_shadow",
+            "memory_qubits": 3,
+            "readout_qubits": 2,
+            "backend": "exact",
+            "floquet": {"omega": 16.0, "n_cycles_per_step": 2, "seed": 23},
+            "encoding": {"mode": "prethermal_shadow", "input_qubits": "memory", "axis": "y", "scale": 0.08, "seed": 29},
+            "shadow": {"pauli_k": 2, "shots": 64, "include_bias": True, "measurement_type": "projective", "seed": 31},
+            "reset": {"reset_state": "zero"},
+            "simulator": {"seed_simulator": 37},
+        }
     )
     dataset = make_dataset()
     result = qres.Experiment(

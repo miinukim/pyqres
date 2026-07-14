@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from itertools import combinations, product
 from typing import List, Sequence
 
 import numpy as np
 
 from .linalg_utils import ensure_finite
-from .pauli import pauli_string
+from .pauli import default_pauli_observable_specs, parse_pauli_observable_spec
 
 try:
     from pyqres.simulation.exact_qrc import ExactQRCModel, ExactQRCModelConfig, partial_trace_ancilla
@@ -71,29 +70,7 @@ class SharedExactStreamingReservoir:
     def parse_memory_observable(self, spec: str) -> np.ndarray:
         """Parse observable specs such as Z0 or X0*Z2 on memory qubits."""
 
-        cleaned = spec.replace(" ", "")
-        if not cleaned:
-            raise ValueError("Observable spec must be non-empty")
-        factors = []
-        for token in cleaned.split("*"):
-            pauli = token[0].upper()
-            if pauli not in {"X", "Y", "Z"}:
-                raise ValueError(f"Unsupported Pauli observable token '{token}'")
-            site = int(token[1:])
-            if not (0 <= site < self.core.nS):
-                raise ValueError(f"Observable token '{token}' is out of range for n_system={self.core.nS}")
-            factors.append((site, pauli))
-        return pauli_string(self.core.nS, tuple(sorted(factors)))
-
-    def _single_site_specs(self, paulis: Sequence[str]) -> List[str]:
-        return [f"{pauli}{site}" for pauli in paulis for site in range(self.core.nS)]
-
-    def _pair_specs(self, paulis_left: Sequence[str], paulis_right: Sequence[str]) -> List[str]:
-        specs: List[str] = []
-        for left_site, right_site in combinations(range(self.core.nS), 2):
-            for left_pauli, right_pauli in product(paulis_left, paulis_right):
-                specs.append(f"{left_pauli}{left_site}*{right_pauli}{right_site}")
-        return specs
+        return parse_pauli_observable_spec(self.core.nS, spec)
 
     def default_memory_observable_specs(
         self,
@@ -102,32 +79,12 @@ class SharedExactStreamingReservoir:
     ) -> List[str]:
         """Return named observable presets used by streaming readout modes."""
 
-        preset_key = preset.lower()
-        if preset_key == "z":
-            obs_specs = [f"Z{i}" for i in range(self.core.nS)]
-        elif preset_key == "x":
-            obs_specs = [f"X{i}" for i in range(self.core.nS)]
-        elif preset_key == "y":
-            obs_specs = [f"Y{i}" for i in range(self.core.nS)]
-        elif preset_key == "xy":
-            obs_specs = self._single_site_specs(("X", "Y"))
-        elif preset_key == "zx":
-            obs_specs = [f"Z{i}" for i in range(self.core.nS)] + [f"X{i}" for i in range(self.core.nS)]
-        elif preset_key == "xyz":
-            obs_specs = self._single_site_specs(("X", "Y", "Z"))
-        elif preset_key == "zz_pairs":
-            obs_specs = self._pair_specs(("Z",), ("Z",))
-        elif preset_key == "pair_xyz":
-            obs_specs = self._pair_specs(("X", "Y", "Z"), ("X", "Y", "Z"))
-        elif preset_key == "rich":
-            obs_specs = self._single_site_specs(("X", "Y", "Z")) + self._pair_specs(("X", "Y", "Z"), ("X", "Y", "Z"))
-        elif preset_key == "custom":
-            obs_specs = []
-        else:
-            raise ValueError(f"Unsupported observable preset '{preset}'")
-        if custom_specs:
-            obs_specs.extend(custom_specs)
-        return list(dict.fromkeys(obs_specs))
+        return default_pauli_observable_specs(
+            self.core.nS,
+            preset=preset,
+            custom_specs=tuple(custom_specs or ()),
+            include_extended_pairs=False,
+        )
 
     def default_memory_observables(
         self,

@@ -11,16 +11,14 @@ are reported close to the actual source of instability.
 
 from math import factorial
 from typing import Sequence
+import warnings
 
 import numpy as np
 import scipy.linalg as la
-import warnings
 
 
 class NumericalStabilityError(RuntimeError):
     """Raised when a computation produces NaNs/Infs or otherwise unstable output."""
-
-    pass
 
 
 def _array_summary(name: str, arr: np.ndarray) -> str:
@@ -73,8 +71,9 @@ def checked_matmul(name: str, left: np.ndarray, right: np.ndarray) -> np.ndarray
     return ensure_finite(name, out)
 
 
-def ensure_hermiticity(arr: np.ndarray):
-    # Ensure Hermiticity a given matrix
+def ensure_hermiticity(arr: np.ndarray) -> np.ndarray:
+    """Return the Hermitian part of a square matrix."""
+
     return 0.5 * (arr + arr.conj().T)
 
 
@@ -85,7 +84,6 @@ def partial_trace_last_subsystem(op: np.ndarray, dim_memory: int, dim_readout: i
     return ensure_finite("partial trace", out)
 
 
-
 def operator_to_ptm_coords(op: np.ndarray, basis: Sequence[np.ndarray], dim_subsystem: int) -> np.ndarray:
     ensure_finite("operator for PTM projection", op)
     coords = []
@@ -94,7 +92,6 @@ def operator_to_ptm_coords(op: np.ndarray, basis: Sequence[np.ndarray], dim_subs
         product = checked_matmul(f"PTM projection basis[{idx}] @ operator", P.conj().T, op)
         coords.append(np.trace(product) / dim_subsystem)
     return ensure_finite("PTM coordinates", np.array(coords, dtype=complex))
-
 
 
 def ptm_coords_to_operator(coords: np.ndarray, basis: Sequence[np.ndarray], dim_subsystem: int) -> np.ndarray:
@@ -131,7 +128,6 @@ def orthogonalize_operator(
     return ensure_finite("orthonormalized operator", out / norm)
 
 
-
 def orthonormal_basis_from_columns(mat: np.ndarray, tol: float = 1e-10) -> np.ndarray:
     if mat.size == 0:
         return np.zeros((mat.shape[0], 0), dtype=complex)
@@ -144,13 +140,11 @@ def orthonormal_basis_from_columns(mat: np.ndarray, tol: float = 1e-10) -> np.nd
     return q[:, :rank]
 
 
-
 def matrix_rank(mat: np.ndarray, tol: float = 1e-10) -> int:
     if mat.size == 0:
         return 0
     s = la.svdvals(mat)
     return int(np.sum(s > tol))
-
 
 
 def null_space(mat: np.ndarray, tol: float = 1e-10) -> np.ndarray:
@@ -169,7 +163,6 @@ def finite_difference_weights(order: int, points: Sequence[int]) -> np.ndarray:
     return np.linalg.solve(a, b)
 
 
-
 def derivative_from_samples(samples: Sequence[np.ndarray], step: float, order: int, points: Sequence[int]) -> np.ndarray:
     # This helper treats each sample as an array-valued function value and applies
     # the same scalar finite-difference stencil to every entry.
@@ -180,7 +173,6 @@ def derivative_from_samples(samples: Sequence[np.ndarray], step: float, order: i
         out += w * sample
     out /= step**order
     return out
-
 
 
 def principal_angles(subspace_a: np.ndarray, subspace_b: np.ndarray) -> np.ndarray:

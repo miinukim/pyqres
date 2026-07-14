@@ -36,6 +36,10 @@ def _partial_trace_system(op: np.ndarray, dim_system: int, dim_ancilla: int) -> 
     return np.trace(op.reshape(dim_system, dim_ancilla, dim_system, dim_ancilla), axis1=0, axis2=2)
 
 
+def _as_input_vector(inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
+    return np.asarray(inputs, dtype=float).reshape(-1)
+
+
 def _pauli_placement_matrix(n_qubits: int, placements: list[tuple[int, str]]) -> np.ndarray:
     ops = [_PAULI_1Q["I"] for _ in range(int(n_qubits))]
     for site, pauli in placements:
@@ -230,7 +234,11 @@ class ChannelMapReservoir:
     def run(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
         """Run a full input stream and stack one feature row per time step."""
 
-        x = np.vstack([self.step(float(u)) for u in inputs])
+        values = _as_input_vector(inputs)
+        if values.size == 0:
+            width = self.core.dim_ancilla + int(bool(self.cfg.include_bias))
+            return np.empty((0, width), dtype=float)
+        x = np.vstack([self.step(float(u)) for u in values])
         if not np.isfinite(x).all():
             raise FloatingPointError("Non-finite features from channel-map reservoir.")
         return x
@@ -306,3 +314,13 @@ class ObservableChannelMapReservoir(ChannelMapReservoir):
         if self.cfg.include_bias:
             return np.concatenate([[1.0], features])
         return features
+
+    def run(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
+        values = _as_input_vector(inputs)
+        if values.size == 0:
+            width = len(self._readout_observables) + int(bool(self.cfg.include_bias))
+            return np.empty((0, width), dtype=float)
+        x = np.vstack([self.step(float(u)) for u in values])
+        if not np.isfinite(x).all():
+            raise FloatingPointError("Non-finite features from observable channel-map reservoir.")
+        return x

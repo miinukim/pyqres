@@ -14,7 +14,7 @@ that PTM from dense operators in the computational basis.
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from itertools import combinations, product
+from itertools import combinations
 from typing import List, Sequence
 
 import numpy as np
@@ -28,8 +28,10 @@ from .linalg_utils import (
 )
 from .pauli import (
     computational_zero_density,
+    computational_zero_state,
+    default_pauli_observable_specs,
     pauli_basis_matrices,
-    pauli_string,
+    parse_pauli_observable_spec,
     single_site_pauli,
     two_site_pauli,
 )
@@ -216,13 +218,19 @@ class ReservoirBase:
         cached = self._cache_get(self._kraus_cache, u)
         if cached is not None:
             return cached
+        kraus = self._kraus_from_reset_state(u, self.reset_state, name="kraus_operators")
+        self._cache_set(self._kraus_cache, u, kraus)
+        return kraus
+
+    def _kraus_from_reset_state(self, u: float, reset_state: np.ndarray, *, name: str) -> np.ndarray:
+        """Contract the joint unitary with one readout reset state."""
+
         U = self.unitary(u)
-        # View the joint unitary as memory-out / readout-in / memory-in / readout-out indices.
         U4 = U.reshape(self.dim_memory, self.dim_readout, self.dim_memory, self.dim_readout)
-        evals, evecs = la.eigh(self.reset_state, check_finite=True)
+        evals, evecs = la.eigh(reset_state, check_finite=True)
         active = evals > 1e-15
         if not np.any(active):
-            raise NumericalStabilityError("Reset state has no positive eigenvalues")
+            raise NumericalStabilityError(f"{name} reset state has no positive eigenvalues")
 
         blocks = []
         for weight, psi in zip(evals[active], evecs[:, active].T, strict=False):
@@ -232,9 +240,7 @@ class ReservoirBase:
             # stacked into a conventional Kraus list over the memory subsystem.
             contracted = np.einsum("arbi,i->arb", U4, psi, optimize=True)
             blocks.append(np.sqrt(weight) * np.transpose(contracted, (1, 0, 2)))
-        kraus = ensure_finite(f"kraus_operators(u={u})", np.concatenate(blocks, axis=0))
-        self._cache_set(self._kraus_cache, u, kraus)
-        return kraus
+        return ensure_finite(f"{name}(u={u})", np.concatenate(blocks, axis=0))
 
     def channel(self, u: float, op_memory: np.ndarray) -> np.ndarray:
         ensure_finite("memory operator", op_memory)
@@ -313,41 +319,7 @@ class ReservoirBase:
         return R
 
     def parse_memory_observable(self, spec: str) -> np.ndarray:
-        # Accepted syntax is a product such as Z0*X2 acting only on memory sites.
-        cleaned = spec.replace(" ", "")
-        if not cleaned:
-            raise ValueError("Observable spec must be non-empty")
-        factors = []
-        for token in cleaned.split("*"):
-            pauli = token[0].upper()
-            if pauli not in {"X", "Y", "Z"}:
-                raise ValueError(f"Unsupported Pauli observable token '{token}'")
-            try:
-                site = int(token[1:])
-            except ValueError as exc:
-                raise ValueError(f"Observable token '{token}' must have an integer site index") from exc
-            if not (0 <= site < self.n_memory):
-                raise ValueError(f"Observable token '{token}' is out of range for n_memory={self.n_memory}")
-            factors.append((site, pauli))
-        return pauli_string(self.n_memory, tuple(sorted(factors)))
-
-    def _single_site_specs(self, paulis: Sequence[str]) -> List[str]:
-        return [f"{pauli}{site}" for pauli in paulis for site in range(self.n_memory)]
-
-    def _pair_specs(self, paulis_left: Sequence[str], paulis_right: Sequence[str]) -> List[str]:
-        specs: List[str] = []
-        for left_site, right_site in combinations(range(self.n_memory), 2):
-            for left_pauli, right_pauli in product(paulis_left, paulis_right):
-                specs.append(f"{left_pauli}{left_site}*{right_pauli}{right_site}")
-        return specs
-
-    def _nearest_neighbor_pair_specs(self, paulis_left: Sequence[str], paulis_right: Sequence[str]) -> List[str]:
-        specs: List[str] = []
-        for left_site in range(self.n_memory - 1):
-            right_site = left_site + 1
-            for left_pauli, right_pauli in product(paulis_left, paulis_right):
-                specs.append(f"{left_pauli}{left_site}*{right_pauli}{right_site}")
-        return specs
+        return parse_pauli_observable_spec(self.n_memory, spec)
 
     def default_memory_observable_specs(
         self,
@@ -357,42 +329,11 @@ class ReservoirBase:
         # These presets are convenience libraries for common readout choices used
         # in the experiments. The return value is still just a list of strings so
         # callers can inspect or augment it before materializing dense operators.
-        preset_key = preset.lower()
-        obs_specs: List[str]
-        if preset_key == "z":
-            obs_specs = [f"Z{i}" for i in range(self.n_memory)]
-        elif preset_key == "x":
-            obs_specs = [f"X{i}" for i in range(self.n_memory)]
-        elif preset_key == "y":
-            obs_specs = [f"Y{i}" for i in range(self.n_memory)]
-        elif preset_key == "xy":
-            obs_specs = self._single_site_specs(("X", "Y"))
-        elif preset_key == "zx":
-            obs_specs = [f"Z{i}" for i in range(self.n_memory)] + [f"X{i}" for i in range(self.n_memory)]
-        elif preset_key == "xyz":
-            obs_specs = self._single_site_specs(("X", "Y", "Z"))
-        elif preset_key == "zz_pairs":
-            obs_specs = self._pair_specs(("Z",), ("Z",))
-        elif preset_key == "xx_pairs":
-            obs_specs = self._pair_specs(("X",), ("X",))
-        elif preset_key == "nn_pairs":
-            obs_specs = self._nearest_neighbor_pair_specs(("X", "Y", "Z"), ("X", "Y", "Z"))
-        elif preset_key == "pair_xyz":
-            obs_specs = self._pair_specs(("X", "Y", "Z"), ("X", "Y", "Z"))
-        elif preset_key == "rich":
-            obs_specs = self._single_site_specs(("X", "Y", "Z")) + self._pair_specs(
-                ("X", "Y", "Z"),
-                ("X", "Y", "Z"),
-            )
-        elif preset_key == "custom":
-            obs_specs = []
-        else:
-            raise ValueError(f"Unsupported observable preset '{preset}'")
-
-        if custom_specs:
-            obs_specs.extend(custom_specs)
-
-        return list(dict.fromkeys(obs_specs))
+        return default_pauli_observable_specs(
+            self.n_memory,
+            preset=preset,
+            custom_specs=tuple(custom_specs or ()),
+        )
 
     def default_memory_observables(
         self,
@@ -698,7 +639,7 @@ class RandomPauliReservoirModel(ReservoirBase):
 
         self.params = params
         self._initialize_common(params.n_memory, params.n_readout, reset_to_zero_state=True)
-        self._identity_total = pauli_string(self.n_total, tuple())
+        self._identity_total = np.eye(self.dim_total, dtype=complex)
         self._fixed_unitary = self._build_random_circuit()
 
     def _rotation_z(self, angle: float) -> np.ndarray:
@@ -772,11 +713,6 @@ class RandomPauliReservoirModel(ReservoirBase):
         # The circuit itself is fixed; only the injected readout state depends on u.
         return self._fixed_unitary
 
-    def _zero_block_state(self, n_qubits: int) -> np.ndarray:
-        state = np.zeros((2**n_qubits, 1), dtype=complex)
-        state[0, 0] = 1.0
-        return state
-
     def _ghz_like_state(self, p: float, n_qubits: int) -> np.ndarray:
         if n_qubits == 1:
             return np.array([[np.sqrt(p)], [np.sqrt(1.0 - p)]], dtype=complex)
@@ -793,9 +729,9 @@ class RandomPauliReservoirModel(ReservoirBase):
         encoded_qubits = self.params.encoding_qubits
         right_qubits = self.n_readout - left_qubits - encoded_qubits
 
-        left_state = self._zero_block_state(left_qubits) if left_qubits > 0 else None
+        left_state = computational_zero_state(left_qubits) if left_qubits > 0 else None
         encoded_state = self._ghz_like_state(p, encoded_qubits)
-        right_state = self._zero_block_state(right_qubits) if right_qubits > 0 else None
+        right_state = computational_zero_state(right_qubits) if right_qubits > 0 else None
 
         # The encoded block is embedded into the full readout register by padding
         # with |0...0> blocks on both sides.
@@ -812,19 +748,8 @@ class RandomPauliReservoirModel(ReservoirBase):
         if cached is not None:
             return cached
 
-        U = self.unitary(u)
-        U4 = U.reshape(self.dim_memory, self.dim_readout, self.dim_memory, self.dim_readout)
         reset_state = self._input_reset_state(u)
-        evals, evecs = la.eigh(reset_state, check_finite=True)
-        active = evals > 1e-15
-        if not np.any(active):
-            raise NumericalStabilityError("Input reset state has no positive eigenvalues")
-
-        blocks = []
-        for weight, psi in zip(evals[active], evecs[:, active].T, strict=False):
-            contracted = np.einsum("arbi,i->arb", U4, psi, optimize=True)
-            blocks.append(np.sqrt(weight) * np.transpose(contracted, (1, 0, 2)))
-        kraus = ensure_finite(f"random_pauli_kraus_operators(u={u})", np.concatenate(blocks, axis=0))
+        kraus = self._kraus_from_reset_state(u, reset_state, name="random_pauli_kraus_operators")
         self._cache_set(self._kraus_cache, u, kraus)
         return kraus
 
@@ -965,11 +890,6 @@ class SYKReservoirModel(ReservoirBase):
         p = self._encoded_probability(u)
         return np.array([np.sqrt(1.0 - p), np.sqrt(p)], dtype=complex)
 
-    def _zero_block_state(self, n_qubits: int) -> np.ndarray:
-        state = np.zeros((2**n_qubits, 1), dtype=complex)
-        state[0, 0] = 1.0
-        return state
-
     def _input_reset_state(self, u: float) -> np.ndarray:
         encoded_state = self.input_state_vector(u).reshape(2, 1)
         left_qubits = self.params.input_qubit
@@ -979,9 +899,9 @@ class SYKReservoirModel(ReservoirBase):
         # qubits simply enlarge the environment and are reset to |0>.
         state = encoded_state
         if left_qubits > 0:
-            state = np.kron(self._zero_block_state(left_qubits), state)
+            state = np.kron(computational_zero_state(left_qubits), state)
         if right_qubits > 0:
-            state = np.kron(state, self._zero_block_state(right_qubits))
+            state = np.kron(state, computational_zero_state(right_qubits))
         return state @ state.conj().T
 
     def _build_unitary(self, u: float) -> np.ndarray:
@@ -992,19 +912,8 @@ class SYKReservoirModel(ReservoirBase):
         cached = self._cache_get(self._kraus_cache, u)
         if cached is not None:
             return cached
-        U = self.unitary(u)
-        U4 = U.reshape(self.dim_memory, self.dim_readout, self.dim_memory, self.dim_readout)
         reset_state = self._input_reset_state(u)
-        evals, evecs = la.eigh(reset_state, check_finite=True)
-        active = evals > 1e-15
-        if not np.any(active):
-            raise NumericalStabilityError("SYK input reset state has no positive eigenvalues")
-
-        blocks = []
-        for weight, psi in zip(evals[active], evecs[:, active].T, strict=False):
-            contracted = np.einsum("arbi,i->arb", U4, psi, optimize=True)
-            blocks.append(np.sqrt(weight) * np.transpose(contracted, (1, 0, 2)))
-        kraus = ensure_finite("SYK Kraus operators", np.concatenate(blocks, axis=0))
+        kraus = self._kraus_from_reset_state(u, reset_state, name="SYK Kraus operators")
         self._cache_set(self._kraus_cache, u, kraus)
         return kraus
 

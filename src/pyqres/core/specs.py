@@ -6,6 +6,17 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
 
+def _collect_extra_parameters(raw: dict[str, Any], known: set[str]) -> dict[str, Any]:
+    """Move unrecognized mapping fields into a parameters dictionary."""
+
+    parameters = dict(raw.get("parameters", {}))
+    for key in list(raw):
+        if key not in known:
+            parameters[key] = raw.pop(key)
+    raw["parameters"] = parameters
+    return parameters
+
+
 @dataclass(frozen=True)
 class InputEncodingSpec:
     """Task-agnostic description of how scalar/vector inputs enter a reservoir.
@@ -43,15 +54,10 @@ class InputEncodingSpec:
             raw["scale"] = raw.pop("strength")
         if raw.get("operator") is not None:
             raw["operator"] = str(raw["operator"]).upper()
-        parameters = dict(raw.get("parameters", {}))
-        known = {"mode", "operator", "targets", "scale", "bias", "parameters"}
-        for key in list(raw):
-            if key not in known:
-                parameters[key] = raw.pop(key)
+        _collect_extra_parameters(raw, {"mode", "operator", "targets", "scale", "bias", "parameters"})
         raw["targets"] = tuple(int(item) for item in raw.get("targets", ()))
         raw["scale"] = float(raw.get("scale", 1.0))
         raw["bias"] = float(raw.get("bias", 0.0))
-        raw["parameters"] = parameters
         return cls(**raw)
 
     def to_dict(self) -> dict[str, Any]:
@@ -96,12 +102,7 @@ class DynamicsSpec:
         if "family" in raw and "name" not in raw:
             raw["name"] = raw.pop("family")
             raw.setdefault("kind", "preset")
-        parameters = dict(raw.get("parameters", {}))
-        known = {"kind", "name", "parameters"}
-        for key in list(raw):
-            if key not in known:
-                parameters[key] = raw.pop(key)
-        raw["parameters"] = parameters
+        _collect_extra_parameters(raw, {"kind", "name", "parameters"})
         return cls(**raw)
 
     def to_dict(self) -> dict[str, Any]:

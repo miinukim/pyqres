@@ -432,11 +432,8 @@ class ExactQRCModel:
 
         probs = np.zeros(self.dim_ancilla, dtype=float)
         branches: list[np.ndarray] = []
-        for outcome, kraus_ancilla in enumerate(self._measurement_kraus):
-            full_kraus = np.kron(self._identity_system, kraus_ancilla)
-            branch = full_kraus @ rho_joint @ full_kraus.conj().T
-            prob = max(float(np.real_if_close(np.trace(branch))), 0.0)
-            probs[outcome] = prob
+        for outcome in range(self.dim_ancilla):
+            branch, probs[outcome] = self._measurement_branch(rho_joint, outcome)
             branches.append(branch)
         total = float(probs.sum())
         if total <= 1e-18:
@@ -444,15 +441,36 @@ class ExactQRCModel:
             branches = [rho_joint.copy() / float(self.dim_ancilla) for _ in range(self.dim_ancilla)]
         return probs, branches
 
+    def _measurement_probabilities(self, rho_joint: np.ndarray) -> np.ndarray:
+        probs = np.zeros(self.dim_ancilla, dtype=float)
+        for outcome in range(self.dim_ancilla):
+            _, probs[outcome] = self._measurement_branch(rho_joint, outcome)
+        total = float(probs.sum())
+        if total <= 1e-18:
+            probs[:] = 1.0 / float(self.dim_ancilla)
+        else:
+            probs /= total
+        return probs
+
+    def _measurement_branch(self, rho_joint: np.ndarray, outcome: int) -> tuple[np.ndarray, float]:
+        full_kraus = np.kron(self._identity_system, self._measurement_kraus[int(outcome)])
+        branch = full_kraus @ rho_joint @ full_kraus.conj().T
+        prob = max(float(np.real_if_close(np.trace(branch))), 0.0)
+        return branch, prob
+
+    def _reset_or_keep_joint_state(self, post: np.ndarray) -> np.ndarray:
+        if self.control.post_measurement_mode == "reset":
+            rho_system = partial_trace_ancilla(post, self.dim_system, self.dim_ancilla)
+            return np.kron(rho_system, self.ancilla_reset_density)
+        return post
+
     def apply_measurement_protocol_exact(self, rho_joint: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Apply measurement, optional feedback, normalization, and reset exactly."""
 
         probs = np.zeros(self.dim_ancilla, dtype=float)
         post = np.zeros_like(rho_joint, dtype=complex)
-        for outcome, kraus_ancilla in enumerate(self._measurement_kraus):
-            full_kraus = np.kron(self._identity_system, kraus_ancilla)
-            branch = full_kraus @ rho_joint @ full_kraus.conj().T
-            probs[outcome] = max(float(np.real_if_close(np.trace(branch))), 0.0)
+        for outcome in range(self.dim_ancilla):
+            branch, probs[outcome] = self._measurement_branch(rho_joint, outcome)
             if self.control.conditioned_gate == "none" or not self._condition_matches(outcome):
                 post += branch
             else:
@@ -467,42 +485,19 @@ class ExactQRCModel:
             probs /= total
             post /= total
 
-        if self.control.post_measurement_mode == "reset":
-            # Resetting is implemented by tracing out the measured ancilla and
-            # tensoring the reduced memory state with |0...0><0...0|.
-            rho_system = partial_trace_ancilla(post, self.dim_system, self.dim_ancilla)
-            next_joint = np.kron(rho_system, self.ancilla_reset_density)
-        else:
-            next_joint = post
-        return probs, next_joint
+        return probs, self._reset_or_keep_joint_state(post)
 
     def sample_measurement_protocol(self, rho_joint: np.ndarray, rng: np.random.Generator) -> tuple[int, np.ndarray]:
         """Sample one measurement branch and return the normalized next state."""
 
-        probs = np.zeros(self.dim_ancilla, dtype=float)
-        for outcome, kraus_ancilla in enumerate(self._measurement_kraus):
-            full_kraus = np.kron(self._identity_system, kraus_ancilla)
-            branch = full_kraus @ rho_joint @ full_kraus.conj().T
-            probs[outcome] = max(float(np.real_if_close(np.trace(branch))), 0.0)
-
-        total = float(probs.sum())
-        if total <= 1e-18:
-            probs[:] = 1.0 / float(self.dim_ancilla)
-        else:
-            probs /= total
+        probs = self._measurement_probabilities(rho_joint)
         outcome = int(rng.choice(np.arange(self.dim_ancilla), p=probs))
-        full_kraus = np.kron(self._identity_system, self._measurement_kraus[outcome])
-        branch = full_kraus @ rho_joint @ full_kraus.conj().T
+        branch, _ = self._measurement_branch(rho_joint, outcome)
         norm = max(float(np.real_if_close(np.trace(branch))), 1e-18)
         post = branch / norm
         gate = self.conditioned_gate(outcome)
         post = gate @ post @ gate.conj().T
-        if self.control.post_measurement_mode == "reset":
-            rho_system = partial_trace_ancilla(post, self.dim_system, self.dim_ancilla)
-            next_joint = np.kron(rho_system, self.ancilla_reset_density)
-        else:
-            next_joint = post
-        return outcome, next_joint
+        return outcome, self._reset_or_keep_joint_state(post)
 
     def system_channel(self, u: float, op_system: np.ndarray) -> np.ndarray:
         """Apply the induced memory channel to an arbitrary system operator."""

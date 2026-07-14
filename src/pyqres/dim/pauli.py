@@ -11,7 +11,7 @@ operators is simpler than introducing sparse or symbolic machinery.
 """
 
 from functools import lru_cache
-from itertools import product
+from itertools import combinations, product
 from typing import Tuple
 
 import numpy as np
@@ -69,6 +69,90 @@ def single_site_pauli(n_qubits: int, site: int, pauli: str) -> np.ndarray:
 def two_site_pauli(n_qubits: int, i: int, pauli_i: str, j: int, pauli_j: str) -> np.ndarray:
     # Sort the support so equivalent requests share the same cache entry in pauli_string().
     return pauli_string(n_qubits, tuple(sorted(((i, pauli_i), (j, pauli_j)))))
+
+
+def parse_pauli_observable_spec(n_qubits: int, spec: str) -> np.ndarray:
+    """Parse specs such as ``Z0`` or ``X0*Z2`` into dense memory operators."""
+
+    cleaned = str(spec).replace(" ", "")
+    if not cleaned:
+        raise ValueError("Observable spec must be non-empty")
+
+    factors = []
+    for token in cleaned.split("*"):
+        pauli = token[0].upper()
+        if pauli not in {"X", "Y", "Z"}:
+            raise ValueError(f"Unsupported Pauli observable token '{token}'")
+        try:
+            site = int(token[1:])
+        except ValueError as exc:
+            raise ValueError(f"Observable token '{token}' must have an integer site index") from exc
+        if not (0 <= site < n_qubits):
+            raise ValueError(f"Observable token '{token}' is out of range for n_qubits={n_qubits}")
+        factors.append((site, pauli))
+    return pauli_string(n_qubits, tuple(sorted(factors)))
+
+
+def single_site_observable_specs(n_qubits: int, paulis: Tuple[str, ...]) -> list[str]:
+    return [f"{pauli}{site}" for pauli in paulis for site in range(n_qubits)]
+
+
+def pair_observable_specs(n_qubits: int, paulis_left: Tuple[str, ...], paulis_right: Tuple[str, ...]) -> list[str]:
+    return [
+        f"{left_pauli}{left_site}*{right_pauli}{right_site}"
+        for left_site, right_site in combinations(range(n_qubits), 2)
+        for left_pauli, right_pauli in product(paulis_left, paulis_right)
+    ]
+
+
+def nearest_neighbor_observable_specs(n_qubits: int, paulis_left: Tuple[str, ...], paulis_right: Tuple[str, ...]) -> list[str]:
+    return [
+        f"{left_pauli}{left_site}*{right_pauli}{left_site + 1}"
+        for left_site in range(n_qubits - 1)
+        for left_pauli, right_pauli in product(paulis_left, paulis_right)
+    ]
+
+
+def default_pauli_observable_specs(
+    n_qubits: int,
+    preset: str = "z",
+    custom_specs: Tuple[str, ...] = (),
+    *,
+    include_extended_pairs: bool = True,
+) -> list[str]:
+    """Return named Pauli observable presets shared by dim models and streams."""
+
+    preset_key = preset.lower()
+    if preset_key in {"x", "y", "z"}:
+        obs_specs = single_site_observable_specs(n_qubits, (preset_key.upper(),))
+    elif preset_key == "xy":
+        obs_specs = single_site_observable_specs(n_qubits, ("X", "Y"))
+    elif preset_key == "zx":
+        obs_specs = single_site_observable_specs(n_qubits, ("Z", "X"))
+    elif preset_key == "xyz":
+        obs_specs = single_site_observable_specs(n_qubits, ("X", "Y", "Z"))
+    elif preset_key == "zz_pairs":
+        obs_specs = pair_observable_specs(n_qubits, ("Z",), ("Z",))
+    elif preset_key == "pair_xyz":
+        obs_specs = pair_observable_specs(n_qubits, ("X", "Y", "Z"), ("X", "Y", "Z"))
+    elif preset_key == "rich":
+        obs_specs = single_site_observable_specs(n_qubits, ("X", "Y", "Z")) + pair_observable_specs(
+            n_qubits,
+            ("X", "Y", "Z"),
+            ("X", "Y", "Z"),
+        )
+    elif include_extended_pairs and preset_key == "xx_pairs":
+        obs_specs = pair_observable_specs(n_qubits, ("X",), ("X",))
+    elif include_extended_pairs and preset_key == "nn_pairs":
+        obs_specs = nearest_neighbor_observable_specs(n_qubits, ("X", "Y", "Z"), ("X", "Y", "Z"))
+    elif preset_key == "custom":
+        obs_specs = []
+    else:
+        raise ValueError(f"Unsupported observable preset '{preset}'")
+
+    if custom_specs:
+        obs_specs.extend(custom_specs)
+    return list(dict.fromkeys(obs_specs))
 
 
 @lru_cache(maxsize=None)

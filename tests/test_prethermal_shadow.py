@@ -46,7 +46,43 @@ def test_imports_do_not_require_qiskit():
 
 def test_experimental_import_path_is_not_provided():
     with pytest.raises(ModuleNotFoundError):
-        __import__("pyqres.experimental.prethermal_shadow")
+        __import__("pyqres.experimental")
+
+
+def test_prethermal_shadow_builds_through_standard_factory():
+    import pyqres as qres
+
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "preset": "prethermal_shadow",
+            "memory_qubits": 2,
+            "readout_qubits": 2,
+            "backend": "exact",
+            "floquet": {
+                "omega": 14.0,
+                "n_cycles_per_step": 1,
+                "seed": 10,
+            },
+            "encoding": {
+                "mode": "prethermal_shadow",
+                "input_qubits": "memory",
+                "axis": "y",
+                "scale": 0.08,
+                "seed": 11,
+            },
+            "shadow": {
+                "pauli_k": 2,
+                "shots": 64,
+                "seed": 12,
+            },
+            "reset": {"reset_state": "zero"},
+        }
+    )
+
+    features = qres.run(reservoir, np.array([0.0, 0.1]))
+
+    assert features.shape == (2, 1 + 3 * 2 + 9)
+    assert reservoir.get_feature_names()[:4] == ["bias", "X_r0", "Y_r0", "Z_r0"]
 
 
 def test_feature_count_and_names():

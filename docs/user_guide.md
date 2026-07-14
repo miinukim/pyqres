@@ -338,8 +338,8 @@ result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 
 ## Prethermal Shadow Reservoir
 
-The prethermal shadow reservoir is implemented as a main-package reservoir
-object. It has its own dense global-Floquet dynamics, trace/reset memory
+The prethermal shadow reservoir is part of the standard pyqres reservoir
+construction path. It has dense global-Floquet dynamics, a trace/reset memory
 channel, and partial-shadow feature reconstruction, while still satisfying the
 generic pyqres reservoir contract:
 
@@ -347,19 +347,39 @@ generic pyqres reservoir contract:
 run_stream(inputs) -> feature_matrix
 ```
 
-The user-facing import path is:
+The recommended construction path is `qresreservoir.from_dict`:
 
 ```python
-from pyqres.prethermal_shadow import (
-    GlobalFloquetConfig,
-    GlobalFloquetPartialShadowReservoir,
-    InputEncodingConfig,
-    PartialShadowReadoutConfig,
-    ReadoutResetConfig,
-)
+reservoir = qres.qresreservoir.from_dict({
+    "preset": "prethermal_shadow",
+    "memory_qubits": 4,
+    "readout_qubits": 2,
+    "backend": "exact",
+    "floquet": {
+        "omega": 12.0,
+        "n_cycles_per_step": 4,
+        "seed": 0,
+    },
+    "encoding": {
+        "mode": "prethermal_shadow",
+        "input_qubits": "memory",
+        "axis": "y",
+        "scale": 0.12,
+        "seed": 1,
+    },
+    "shadow": {
+        "pauli_k": 2,
+        "shots": 2048,
+        "measurement_type": "weak",
+        "weak_strength": 0.5,
+        "seed": 2,
+    },
+    "reset": {"reset_state": "zero"},
+})
 ```
 
-The implementation is split by responsibility:
+The lower-level classes remain available for advanced diagnostics and custom
+construction. The implementation is split by responsibility:
 
 ```text
 src/pyqres/prethermal_shadow/config.py
@@ -390,23 +410,17 @@ The customization surface is deliberately modular:
 - Use `diagnostics.py` helpers for projected memory-channel spectra and
   empirical OVD estimates.
 
-Example shape:
+Example task run:
 
 ```python
-reservoir = GlobalFloquetPartialShadowReservoir(
-    GlobalFloquetConfig(n_qubits=6, n_memory=4, n_readout=2, omega=12.0, n_cycles_per_step=4),
-    InputEncodingConfig(input_qubits="memory", axis="y", beta=0.12),
-    PartialShadowReadoutConfig(pauli_k=2, shots=2048, measurement_type="weak", weak_strength=0.5),
-    ReadoutResetConfig(reset_state="zero"),
-)
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
 
 For two readout qubits and `pauli_k=2`, the feature count is
 `bias + 3*2 + 9 = 16` when `include_bias=True`.
 
-The same core classes are also exported from the top-level `pyqres` namespace
-for convenience, for example `pyqres.GlobalFloquetPartialShadowReservoir`.
+The same core classes are exported from the top-level `pyqres` namespace for
+advanced use, for example `pyqres.GlobalFloquetPartialShadowReservoir`.
 
 ## Qiskit, MPS, And GPU Simulation
 
@@ -538,9 +552,11 @@ reservoir = qres.qresreservoir.from_dict({
 The object does not need to inherit from a pyqres base class. It only needs to
 return a finite feature matrix with one row per input sample.
 
-The prethermal shadow reservoir follows this same path. It is a pyqres-compatible
-object because it exposes `run_stream`, `run`, and `transform`, not because it
-inherits from a base class or is registered in the dictionary factory.
+The prethermal shadow reservoir follows the registered preset path:
+
+```python
+qres.qresreservoir.from_dict({"preset": "prethermal_shadow", ...})
+```
 
 ## Adding A Backend
 

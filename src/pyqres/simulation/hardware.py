@@ -15,6 +15,10 @@ import numpy as np
 from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
 
 
+def _as_input_vector(inputs: Sequence[float]) -> np.ndarray:
+    return np.asarray(inputs, dtype=float).reshape(-1)
+
+
 @dataclass
 class HardwareTrajectoryReservoirConfig(ExactQRCModelConfig):
     """Configuration for finite-shot trajectory features."""
@@ -40,18 +44,19 @@ class HardwareTrajectoryReservoir:
     def run(self, inputs: Sequence[float]) -> np.ndarray:
         """Sample shots independent trajectories over the same input stream."""
 
-        counts = np.zeros((len(inputs), self.core.dim_ancilla), dtype=int)
+        values = _as_input_vector(inputs)
+        counts = np.zeros((values.size, self.core.dim_ancilla), dtype=int)
         for _ in range(int(self.cfg.shots)):
             # Each shot starts from the requested initial joint state and then
             # follows its own sampled measurement branch through time.
             rho_joint = self.core.initial_joint_density(self.cfg.init_state)
-            for t, u in enumerate(inputs):
+            for t, u in enumerate(values):
                 rho_joint = self.core.evolve_joint(rho_joint, float(u))
                 outcome, rho_joint = self.core.sample_measurement_protocol(rho_joint, self.rng)
                 counts[t, outcome] += 1
         probs = counts.astype(float) / float(self.cfg.shots)
         if self.cfg.include_bias:
-            return np.hstack([np.ones((len(inputs), 1)), probs])
+            return np.hstack([np.ones((values.size, 1)), probs])
         return probs
 
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
