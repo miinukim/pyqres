@@ -242,10 +242,9 @@ class ReservoirParams:
     """Hamiltonian parameter generation for simulation reservoirs.
 
     The public output is always a backend-neutral pair H0_hamiltonian and
-    H1_hamiltonian. The built-in Ising-type preset is just a compact generator
-    for one such pair: H0 contains fixed transverse X fields and open-boundary
-    nearest-neighbor ZZ couplings, while H1 contains the input-modulated Z
-    fields.
+    H1_hamiltonian. The built-in Ising-type presets are compact generators for
+    one such pair: H0 contains fixed transverse X fields and ZZ couplings,
+    while H1 contains input-modulated Z fields.
 
     For broader Hamiltonians, set hamiltonian_kind="matrix" and provide
     h0_matrix/h1_matrix, or set hamiltonian_kind="pauli_terms" and provide

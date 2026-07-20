@@ -22,4 +22,4 @@ docs/*
 !docs/user_guide.md
 !docs/volterra_numerical_methods.md
 *.log
-tests/
+tests/*

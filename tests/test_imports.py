@@ -801,3 +801,30 @@ def test_qresreservoir_infers_dynamics_from_instances_and_shapes():
     )
     object_features = qres.run(object_reservoir, np.array([0.2, 0.4]))
     assert object_features.tolist() == [[1.0, 0.2], [1.0, 0.4]]
+
+
+def test_nisqrc_ising_preset_and_probability_feature_names():
+    import numpy as np
+
+    from pyqres.core import ReservoirParams
+    from pyqres.simulation import ChannelMapReservoir, ChannelMapReservoirConfig
+
+    generated = ReservoirParams.nisqrc_ising(n_system=1, n_ancilla=2, seed=7).generate()
+    h0_sites = [term.operators for term in generated["H0_hamiltonian"].terms]
+    h1_sites = [term.operators for term in generated["H1_hamiltonian"].terms]
+
+    assert sum(len(sites) == 1 and sites[0][1] == "X" for sites in h0_sites) == 3
+    assert sum(len(sites) == 2 for sites in h0_sites) == 3
+    assert h1_sites == [((site, "Z"),) for site in range(3)]
+
+    repeated = ReservoirParams.nisqrc_ising(n_system=1, n_ancilla=2, seed=7).generate()
+    assert np.allclose(
+        generated["H0_hamiltonian"].to_dense(),
+        repeated["H0_hamiltonian"].to_dense(),
+    )
+
+    reservoir = ChannelMapReservoir(
+        ChannelMapReservoirConfig(n_system=1, n_ancilla=2, include_bias=True, seed=1)
+    )
+    assert reservoir.get_feature_names() == ["bias", "p_00", "p_01", "p_10", "p_11"]
+    assert reservoir.run([0.0]).shape[1] == len(reservoir.get_feature_names())
