@@ -371,7 +371,12 @@ assert X.shape[1] == 1 + (3 * 2 + 9)
 
 Important behavior:
 
-- Memory qubits are laid out first; readout qubits are the trailing subset.
+- Memory qubits are laid out first and readout qubits are trailing by default.
+  Set `GlobalFloquetConfig.readout_qubits` to an ordered sequence of arbitrary
+  physical indices; memory becomes the ascending complement. For example,
+  `readout_qubits=(1, 3)` in a four-qubit reservoir gives memory `(0, 2)`.
+- Local feature labels follow the configured order: with
+  `readout_qubits=(3, 1)`, `r0` is physical qubit 3 and `r1` is physical qubit 1.
 - The global Floquet Hamiltonian acts on all `n_memory + n_readout` qubits,
   including readout qubits. There is no explicit transducer block.
 - Features are exact readout Pauli expectations or projective/weak local

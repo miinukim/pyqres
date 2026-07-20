@@ -85,6 +85,32 @@ def test_prethermal_shadow_builds_through_standard_factory():
     assert reservoir.get_feature_names()[:4] == ["bias", "X_r0", "Y_r0", "Z_r0"]
 
 
+def test_standard_factory_accepts_manual_readout_indices():
+    import pyqres as qres
+
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "preset": "prethermal_shadow",
+            "memory_qubits": 2,
+            "readout_qubits": 2,
+            "backend": "exact",
+            "floquet": {
+                "omega": 14.0,
+                "n_cycles_per_step": 1,
+                "readout_qubits": [1, 3],
+            },
+            "shadow": {
+                "pauli_k": 1,
+                "exact_expectations": True,
+                "return_shadow_estimates": False,
+            },
+        }
+    )
+
+    assert reservoir.memory_qubits == (0, 2)
+    assert reservoir.readout_qubits == (1, 3)
+
+
 def test_feature_count_and_names():
     res = small_reservoir(pauli_k=2, include_bias=True)
     assert len(res.get_feature_names()) == 1 + 3 * 2 + 9
@@ -269,3 +295,99 @@ def test_acceptance_shape():
     x = res.run(np.random.default_rng(0).normal(size=3))
     assert x.shape == (3, 1 + (3 * 2 + 9))
     assert len(res.get_feature_names()) == x.shape[1]
+
+
+def test_arbitrary_readout_partition_preserves_subsystem_states():
+    from pyqres.prethermal_shadow.dynamics import combine_subsystem_states, partial_trace_qubits
+
+    rng = np.random.default_rng(51)
+    rho_memory = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    rho_memory = rho_memory @ rho_memory.conj().T
+    rho_memory /= np.trace(rho_memory)
+    rho_readout = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    rho_readout = rho_readout @ rho_readout.conj().T
+    rho_readout /= np.trace(rho_readout)
+
+    memory_qubits = (0, 2)
+    readout_qubits = (3, 1)
+    joint = combine_subsystem_states(rho_memory, rho_readout, memory_qubits, readout_qubits)
+
+    assert np.allclose(partial_trace_qubits(joint, 4, memory_qubits), rho_memory)
+    assert np.allclose(partial_trace_qubits(joint, 4, readout_qubits), rho_readout)
+
+
+def test_noncontiguous_readout_reservoir_and_dimension_channel_agree():
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        GlobalFloquetPartialShadowReservoir,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        PrethermalShadowDimensionModel,
+    )
+
+    reservoir = GlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(
+            n_qubits=4,
+            n_memory=2,
+            n_readout=2,
+            omega=14.0,
+            n_cycles_per_step=1,
+            readout_qubits=(3, 1),
+            seed=52,
+        ),
+        InputEncodingConfig(input_qubits="memory", beta=0.08, random_beta=False),
+        PartialShadowReadoutConfig(
+            pauli_k=1,
+            exact_expectations=True,
+            return_shadow_estimates=False,
+        ),
+    )
+    assert reservoir.memory_qubits == (0, 2)
+    assert reservoir.readout_qubits == (3, 1)
+    assert reservoir.input_qubits == (0, 2)
+    assert reservoir.run([0.1, -0.2]).shape == (2, 7)
+
+    rng = np.random.default_rng(53)
+    state = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    state = state @ state.conj().T
+    state /= np.trace(state)
+    model = PrethermalShadowDimensionModel(reservoir)
+    assert np.allclose(model.channel(0.17, state), reservoir._memory_channel(state, 0.17), atol=1e-11)
+    rho_pre = reservoir._pre_measurement_state(state, 0.17)
+    expected_features = reservoir.exact_features_from_state(rho_pre)[1:]
+    feature_observables = model.feature_observables(0.17)
+    actual_features = np.asarray([np.trace(observable @ state).real for observable in feature_observables])
+    assert np.allclose(actual_features, expected_features, atol=1e-11)
+
+
+@pytest.mark.parametrize("readout_qubits", [(1,), (1, 1), (-1, 2), (1, 4)])
+def test_invalid_manual_readout_indices_are_rejected(readout_qubits):
+    from pyqres.prethermal_shadow import GlobalFloquetConfig, GlobalFloquetPartialShadowReservoir
+
+    config = GlobalFloquetConfig(
+        n_qubits=4,
+        n_memory=2,
+        n_readout=2,
+        omega=14.0,
+        n_cycles_per_step=1,
+        readout_qubits=readout_qubits,
+    )
+    with pytest.raises(ValueError, match="readout_qubits"):
+        GlobalFloquetPartialShadowReservoir(config)
+
+
+def test_manual_partition_filters_memory_readout_couplings():
+    from pyqres.prethermal_shadow import GlobalFloquetConfig
+    from pyqres.prethermal_shadow.dynamics import generate_hamiltonian_parameters
+
+    config = GlobalFloquetConfig(
+        n_qubits=4,
+        n_memory=2,
+        n_readout=2,
+        omega=14.0,
+        n_cycles_per_step=1,
+        topology="all_to_all",
+        include_mr_couplings=False,
+        readout_qubits=(1, 3),
+    )
+    assert generate_hamiltonian_parameters(config)["edges"] == ((0, 2), (1, 3))

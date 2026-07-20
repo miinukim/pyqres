@@ -13,14 +13,17 @@ from .dynamics import (
     build_drive_hamiltonian,
     build_global_h0,
     build_step_unitary,
+    combine_subsystem_states,
     density_plus,
     density_zero,
     generate_hamiltonian_parameters,
     kron_all,
-    partial_trace_memory_first,
+    partial_trace_qubits,
     pauli_string,
     parse_pauli_operator,
     project_density,
+    reorder_qubit_operator,
+    resolve_qubit_partition,
     step_duration,
     validate_floquet_config,
 )
@@ -44,7 +47,8 @@ def _resolve_input_qubits(cfg: InputEncodingConfig, floquet: GlobalFloquetConfig
     if isinstance(spec, str):
         key = spec.lower()
         if key == "memory":
-            return tuple(range(int(floquet.n_memory)))
+            memory_qubits, _ = resolve_qubit_partition(floquet)
+            return memory_qubits
         if key == "all":
             return tuple(range(int(floquet.n_qubits)))
         raise ValueError("input_qubits must be 'memory', 'all', or a sequence of indices.")
@@ -123,6 +127,8 @@ class GlobalFloquetPartialShadowReservoir:
         self.n_qubits = int(floquet_config.n_qubits)
         self.n_memory = int(floquet_config.n_memory)
         self.n_readout = int(floquet_config.n_readout)
+        self.memory_qubits, self.readout_qubits = resolve_qubit_partition(floquet_config)
+        self.subsystem_qubit_order = (*self.memory_qubits, *self.readout_qubits)
         self.dim_memory = 2**self.n_memory
         self.dim_readout = 2**self.n_readout
         self.dim_total = 2**self.n_qubits
@@ -220,10 +226,34 @@ class GlobalFloquetPartialShadowReservoir:
         return out
 
     def _pre_measurement_state(self, rho_memory: np.ndarray, u: float) -> np.ndarray:
-        rho0 = np.kron(project_density(rho_memory), self._readout_reset_state())
+        rho0 = combine_subsystem_states(
+            project_density(rho_memory),
+            self._readout_reset_state(),
+            self.memory_qubits,
+            self.readout_qubits,
+        )
         u_step = self.u_floquet_step @ self._input_unitary(float(u))
         rho_pre = u_step @ rho0 @ u_step.conj().T
         return project_density(rho_pre)
+
+    def _step_unitary_subsystem_order(self, u: float) -> np.ndarray:
+        """Return one physical step unitary in logical memory/readout order."""
+
+        unitary = self.u_floquet_step @ self._input_unitary(float(u))
+        return reorder_qubit_operator(
+            unitary,
+            tuple(range(self.n_qubits)),
+            self.subsystem_qubit_order,
+        )
+
+    def _reduced_state(self, rho: np.ndarray, scope: str) -> np.ndarray:
+        if scope == "memory":
+            qubits = self.memory_qubits
+        elif scope == "readout":
+            qubits = self.readout_qubits
+        else:
+            raise ValueError("scope must be memory or readout.")
+        return partial_trace_qubits(rho, self.n_qubits, qubits)
 
     def exact_features_from_state(self, rho_pre: np.ndarray) -> np.ndarray:
         """Compute exact Pauli expectations for the configured feature scope."""
@@ -231,7 +261,7 @@ class GlobalFloquetPartialShadowReservoir:
         if self.feature_scope == "full":
             rho = project_density(rho_pre)
         else:
-            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep=self.feature_scope)
+            rho = self._reduced_state(rho_pre, self.feature_scope)
         return exact_readout_expectations(
             project_density(rho),
             self.pauli_labels,
@@ -243,7 +273,7 @@ class GlobalFloquetPartialShadowReservoir:
 
         if self.feature_scope != "readout":
             raise ValueError("Finite-shot shadow feature estimates are only implemented for feature_scope='readout'.")
-        rho_r = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+        rho_r = self._reduced_state(rho_pre, "readout")
         result = sample_partial_shadow_features(
             project_density(rho_r),
             self.pauli_labels,
@@ -269,7 +299,7 @@ class GlobalFloquetPartialShadowReservoir:
             features = self.exact_features_from_state(rho_pre)
         else:
             features = self.shadow_features_from_state(rho_pre, int(self.shadow_config.shots))
-        self.rho_memory = project_density(partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="memory"))
+        self.rho_memory = project_density(self._reduced_state(rho_pre, "memory"))
         return np.asarray(features, dtype=float)
 
     def run(self, inputs: Sequence[float] | np.ndarray) -> np.ndarray:
@@ -303,10 +333,15 @@ class GlobalFloquetPartialShadowReservoir:
         return self.get_feature_names()
 
     def _memory_channel(self, op_memory: np.ndarray, u_bar: float = 0.0) -> np.ndarray:
-        rho0 = np.kron(np.asarray(op_memory, dtype=complex), self._readout_reset_state())
+        rho0 = combine_subsystem_states(
+            np.asarray(op_memory, dtype=complex),
+            self._readout_reset_state(),
+            self.memory_qubits,
+            self.readout_qubits,
+        )
         u_step = self.u_floquet_step @ self._input_unitary(float(u_bar))
         out = u_step @ rho0 @ u_step.conj().T
-        return partial_trace_memory_first(out, self.n_memory, self.n_readout, keep="memory")
+        return self._reduced_state(out, "memory")
 
     def build_projected_memory_channel(self, pauli_k: int = 2) -> np.ndarray:
         """Build projected induced memory channel on low-weight memory Paulis."""
@@ -332,10 +367,10 @@ class GlobalFloquetPartialShadowReservoir:
             rho = rho_pre
             n = self.n_qubits
         elif scope_key == "memory":
-            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="memory")
+            rho = self._reduced_state(rho_pre, "memory")
             n = self.n_memory
         elif scope_key == "readout":
-            rho = partial_trace_memory_first(rho_pre, self.n_memory, self.n_readout, keep="readout")
+            rho = self._reduced_state(rho_pre, "readout")
             n = self.n_readout
         else:
             raise ValueError("observable_scope must be full, memory, or readout.")
@@ -366,8 +401,8 @@ class GlobalFloquetPartialShadowReservoir:
             pre_minus = self._pre_measurement_state(rho_minus, u_minus)
             diff = self._scope_expectations(pre_plus, observable_scope, pauli_k) - self._scope_expectations(pre_minus, observable_scope, pauli_k)
             out.append(float(np.linalg.norm(diff)))
-            rho_plus = project_density(partial_trace_memory_first(pre_plus, self.n_memory, self.n_readout, keep="memory"))
-            rho_minus = project_density(partial_trace_memory_first(pre_minus, self.n_memory, self.n_readout, keep="memory"))
+            rho_plus = project_density(self._reduced_state(pre_plus, "memory"))
+            rho_minus = project_density(self._reduced_state(pre_minus, "memory"))
         return np.asarray(out, dtype=float)
 
 

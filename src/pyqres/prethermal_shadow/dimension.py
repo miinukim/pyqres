@@ -20,7 +20,7 @@ from ..dim.pauli import (
     pauli_basis_matrices,
     parse_pauli_observable_spec,
 )
-from .dynamics import pauli_string
+from .dynamics import pauli_string, reorder_qubit_operator
 from .reservoir import GlobalFloquetPartialShadowReservoir
 
 
@@ -91,10 +91,7 @@ class PrethermalShadowDimensionModel:
     def unitary(self, u: float) -> np.ndarray:
         """Return the exact input-then-Floquet unitary used by one STM step."""
 
-        return ensure_finite(
-            "prethermal step unitary",
-            self.reservoir.u_floquet_step @ self.reservoir._input_unitary(float(u)),
-        )
+        return ensure_finite("prethermal step unitary", self.reservoir._step_unitary_subsystem_order(float(u)))
 
     def _kraus_blocks(self, u: float) -> np.ndarray:
         """Return Kraus operators grouped by reset eigenstate and readout output."""
@@ -221,6 +218,11 @@ class PrethermalShadowDimensionModel:
                 induced = self._induced_memory_observable(feature_op, float(expansion_point))
             else:
                 feature_op = pauli_string(self.reservoir.n_qubits, label)
+                feature_op = reorder_qubit_operator(
+                    feature_op,
+                    tuple(range(self.reservoir.n_qubits)),
+                    self.reservoir.subsystem_qubit_order,
+                )
                 induced = self._induced_joint_observable(feature_op, float(expansion_point))
             observables.append(induced)
         return observables

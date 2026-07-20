@@ -10,8 +10,9 @@ from typing import Sequence
 class GlobalFloquetConfig:
     """All-qubit fast-driven Floquet dynamics.
 
-    Qubits are laid out as memory first, then readout:
-    memory ``0..n_memory-1`` and readout ``n_memory..n_qubits-1``.
+    By default, memory occupies ``0..n_memory-1`` and readout occupies the
+    remaining qubits. ``readout_qubits`` can select and order arbitrary physical
+    readout indices; memory then becomes the ascending complement.
     """
 
     n_qubits: int
@@ -42,6 +43,7 @@ class GlobalFloquetConfig:
     seed: int = 0
     topology: str = "chain"
     include_mr_couplings: bool = True
+    readout_qubits: Sequence[int] | None = None
 
 
 @dataclass(frozen=True)

@@ -391,9 +391,13 @@ src/pyqres/prethermal_shadow/diagnostics.py
 
 Key runtime semantics:
 
-- Memory qubits are laid out first and persist across the entire input stream.
-- Readout qubits are the trailing subset. The global Floquet Hamiltonian acts
-  on memory and readout qubits together; there is no explicit transducer block.
+- Memory qubits persist across the entire input stream. They are the leading
+  contiguous subset by default.
+- Readout qubits are trailing by default. Set `floquet.readout_qubits` to an
+  ordered list of arbitrary physical indices; memory becomes the ascending
+  complement, and the list order defines local labels `r0`, `r1`, and so on.
+- The global Floquet Hamiltonian acts on memory and readout qubits together;
+  there is no explicit transducer block.
 - Features are computed from the pre-reset readout marginal, either as exact
   Pauli expectations or as projective/weak local Pauli shadow estimates.
 - After feature extraction, readout is traced out and reset to `zero` or `plus`

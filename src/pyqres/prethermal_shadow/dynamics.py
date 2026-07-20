@@ -89,26 +89,74 @@ def parse_pauli_operator(
     return out
 
 
-def chain_edges(n_qubits: int, n_memory: int, include_mr_couplings: bool = True) -> tuple[tuple[int, int], ...]:
+def resolve_qubit_partition(cfg: GlobalFloquetConfig) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return logical memory and readout qubits in their subsystem order."""
+
+    n_qubits = int(cfg.n_qubits)
+    if cfg.readout_qubits is None:
+        readout = tuple(range(int(cfg.n_memory), n_qubits))
+    else:
+        readout = tuple(int(qubit) for qubit in cfg.readout_qubits)
+    if len(readout) != int(cfg.n_readout):
+        raise ValueError("readout_qubits must contain exactly n_readout indices.")
+    if len(set(readout)) != len(readout):
+        raise ValueError("readout_qubits must not contain duplicates.")
+    if any(qubit < 0 or qubit >= n_qubits for qubit in readout):
+        raise ValueError("readout_qubits contains an out-of-range qubit.")
+    readout_set = set(readout)
+    memory = tuple(qubit for qubit in range(n_qubits) if qubit not in readout_set)
+    if len(memory) != int(cfg.n_memory):
+        raise ValueError("readout_qubits is inconsistent with n_memory and n_qubits.")
+    return memory, readout
+
+
+def chain_edges(
+    n_qubits: int,
+    n_memory: int,
+    include_mr_couplings: bool = True,
+    readout_qubits: Sequence[int] | None = None,
+) -> tuple[tuple[int, int], ...]:
+    readout = set(
+        range(int(n_memory), int(n_qubits))
+        if readout_qubits is None
+        else (int(qubit) for qubit in readout_qubits)
+    )
     edges = []
     for i in range(int(n_qubits) - 1):
-        if not include_mr_couplings and i == int(n_memory) - 1:
+        crosses_mr = (i in readout) != (i + 1 in readout)
+        if not include_mr_couplings and crosses_mr:
             continue
         edges.append((i, i + 1))
     return tuple(edges)
 
 
-def topology_edges(n_qubits: int, n_memory: int, topology: str, include_mr_couplings: bool = True) -> tuple[tuple[int, int], ...]:
+def topology_edges(
+    n_qubits: int,
+    n_memory: int,
+    topology: str,
+    include_mr_couplings: bool = True,
+    readout_qubits: Sequence[int] | None = None,
+) -> tuple[tuple[int, int], ...]:
     key = str(topology).lower()
     n = int(n_qubits)
     n_mem = int(n_memory)
+    readout = set(
+        range(n_mem, n)
+        if readout_qubits is None
+        else (int(qubit) for qubit in readout_qubits)
+    )
     if key == "chain":
-        return chain_edges(n, n_mem, include_mr_couplings=include_mr_couplings)
+        return chain_edges(
+            n,
+            n_mem,
+            include_mr_couplings=include_mr_couplings,
+            readout_qubits=tuple(readout),
+        )
     if key == "all_to_all":
         edges = []
         for i in range(n):
             for j in range(i + 1, n):
-                crosses_mr = i < n_mem <= j
+                crosses_mr = (i in readout) != (j in readout)
                 if include_mr_couplings or not crosses_mr:
                     edges.append((i, j))
         return tuple(edges)
@@ -137,6 +185,7 @@ def validate_floquet_config(cfg: GlobalFloquetConfig) -> None:
         raise ValueError("n_readout must be positive.")
     if int(cfg.n_memory) + int(cfg.n_readout) != int(cfg.n_qubits):
         raise ValueError("n_qubits must equal n_memory + n_readout.")
+    resolve_qubit_partition(cfg)
     if float(cfg.omega) <= 0.0:
         raise ValueError("omega must be positive.")
     if int(cfg.n_cycles_per_step) <= 0:
@@ -157,7 +206,14 @@ def generate_hamiltonian_parameters(cfg: GlobalFloquetConfig) -> dict[str, np.nd
     validate_floquet_config(cfg)
     rng = np.random.default_rng(int(cfg.seed))
     n = int(cfg.n_qubits)
-    edges = topology_edges(n, int(cfg.n_memory), str(cfg.topology), bool(cfg.include_mr_couplings))
+    _, readout_qubits = resolve_qubit_partition(cfg)
+    edges = topology_edges(
+        n,
+        int(cfg.n_memory),
+        str(cfg.topology),
+        bool(cfg.include_mr_couplings),
+        readout_qubits=readout_qubits,
+    )
     random_drive_sign = bool(cfg.random_drive if cfg.random_drive_sign is None else cfg.random_drive_sign)
     h = _uniform_or_ones(rng, bool(cfg.random_h), cfg.h_range, n)
     if cfg.parameter_draw_order == "operator_test":
@@ -252,14 +308,87 @@ def density_plus(n_qubits: int) -> np.ndarray:
 
 
 def partial_trace_memory_first(rho: np.ndarray, n_memory: int, n_readout: int, keep: str) -> np.ndarray:
-    dim_m = 2 ** int(n_memory)
-    dim_r = 2 ** int(n_readout)
-    tensor = np.asarray(rho, dtype=complex).reshape(dim_m, dim_r, dim_m, dim_r)
+    n_memory = int(n_memory)
+    n_readout = int(n_readout)
     if keep == "memory":
-        return np.trace(tensor, axis1=1, axis2=3)
-    if keep == "readout":
-        return np.trace(tensor, axis1=0, axis2=2)
-    raise ValueError("keep must be memory or readout.")
+        keep_qubits = tuple(range(n_memory))
+    elif keep == "readout":
+        keep_qubits = tuple(range(n_memory, n_memory + n_readout))
+    else:
+        raise ValueError("keep must be memory or readout.")
+    return partial_trace_qubits(rho, n_memory + n_readout, keep_qubits)
+
+
+def reorder_qubit_operator(
+    operator: np.ndarray,
+    current_order: Sequence[int],
+    target_order: Sequence[int],
+) -> np.ndarray:
+    """Reorder matrix tensor factors from ``current_order`` to ``target_order``."""
+
+    current = tuple(int(qubit) for qubit in current_order)
+    target = tuple(int(qubit) for qubit in target_order)
+    if (
+        len(current) != len(target)
+        or len(set(current)) != len(current)
+        or len(set(target)) != len(target)
+        or set(current) != set(target)
+    ):
+        raise ValueError("current_order and target_order must contain the same unique qubits.")
+    n_qubits = len(current)
+    dim = 2**n_qubits
+    matrix = np.asarray(operator, dtype=complex)
+    if matrix.shape != (dim, dim):
+        raise ValueError(f"operator must have shape {(dim, dim)}.")
+    positions = {qubit: index for index, qubit in enumerate(current)}
+    row_axes = [positions[qubit] for qubit in target]
+    axes = [*row_axes, *(n_qubits + axis for axis in row_axes)]
+    return matrix.reshape((2,) * (2 * n_qubits)).transpose(axes).reshape(dim, dim)
+
+
+def combine_subsystem_states(
+    rho_memory: np.ndarray,
+    rho_readout: np.ndarray,
+    memory_qubits: Sequence[int],
+    readout_qubits: Sequence[int],
+) -> np.ndarray:
+    """Embed a memory/readout product state into physical qubit order."""
+
+    memory = tuple(int(qubit) for qubit in memory_qubits)
+    readout = tuple(int(qubit) for qubit in readout_qubits)
+    subsystem_order = (*memory, *readout)
+    return reorder_qubit_operator(
+        np.kron(np.asarray(rho_memory, dtype=complex), np.asarray(rho_readout, dtype=complex)),
+        subsystem_order,
+        tuple(range(len(subsystem_order))),
+    )
+
+
+def partial_trace_qubits(
+    rho: np.ndarray,
+    n_qubits: int,
+    keep_qubits: Sequence[int],
+) -> np.ndarray:
+    """Trace out arbitrary qubits and order the result as ``keep_qubits``."""
+
+    n_qubits = int(n_qubits)
+    keep = tuple(int(qubit) for qubit in keep_qubits)
+    if len(set(keep)) != len(keep):
+        raise ValueError("keep_qubits must not contain duplicates.")
+    if any(qubit < 0 or qubit >= n_qubits for qubit in keep):
+        raise ValueError("keep_qubits contains an out-of-range qubit.")
+    dim = 2**n_qubits
+    matrix = np.asarray(rho, dtype=complex)
+    if matrix.shape != (dim, dim):
+        raise ValueError(f"rho must have shape {(dim, dim)}.")
+    keep_set = set(keep)
+    traced = tuple(qubit for qubit in range(n_qubits) if qubit not in keep_set)
+    order = (*keep, *traced)
+    tensor = reorder_qubit_operator(matrix, tuple(range(n_qubits)), order)
+    dim_keep = 2 ** len(keep)
+    dim_traced = 2 ** len(traced)
+    tensor = tensor.reshape(dim_keep, dim_traced, dim_keep, dim_traced)
+    return np.trace(tensor, axis1=1, axis2=3)
 
 
 def project_density(rho: np.ndarray, *, tol: float = 1e-12) -> np.ndarray:
@@ -277,16 +406,20 @@ __all__ = [
     "build_global_h0",
     "build_step_unitary",
     "chain_edges",
+    "combine_subsystem_states",
     "density_plus",
     "density_zero",
     "fast_period",
     "generate_hamiltonian_parameters",
     "kron_all",
     "partial_trace_memory_first",
+    "partial_trace_qubits",
     "pauli_string",
     "parse_pauli_operator",
     "parse_pauli_placements",
     "project_density",
+    "reorder_qubit_operator",
+    "resolve_qubit_partition",
     "step_duration",
     "topology_edges",
     "validate_floquet_config",
