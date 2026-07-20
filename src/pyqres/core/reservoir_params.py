@@ -264,6 +264,7 @@ class ReservoirParams:
     fixed_x_field_scale: float = 1.0
     input_z_field_scale: float = 1.0
     zz_coupling_scale: float = 1.0
+    zz_connectivity: str = "open_chain"
     h0_matrix: Any | None = None
     h1_matrix: Any | None = None
     h0_hamiltonian: HamiltonianSpec | None = None
@@ -276,6 +277,26 @@ class ReservoirParams:
         """Create the built-in Ising-type Hamiltonian preset."""
 
         kwargs.setdefault("hamiltonian_kind", "ising")
+        return cls(**kwargs)
+
+    @classmethod
+    def nisqrc_ising(cls, **kwargs: Any) -> "ReservoirParams":
+        """Create the Ising encoding used by Hu et al.'s NISQRC model.
+
+        The defaults reproduce the fully connected Hamiltonian instance used
+        for the paper's numerical channel-equalization experiment: fixed random
+        ZZ couplings, transverse X fields, and input-modulated longitudinal Z
+        fields. Coefficients are drawn once by :meth:`generate` and remain fixed
+        for the complete input stream.
+        """
+
+        kwargs.setdefault("hamiltonian_kind", "ising")
+        kwargs.setdefault("fixed_x_field_base", 2.0)
+        kwargs.setdefault("fixed_x_field_std", 2.0)
+        kwargs.setdefault("input_z_field_base", 0.5)
+        kwargs.setdefault("input_z_field_std", 0.5)
+        kwargs.setdefault("zz_coupling_scale", 1.0)
+        kwargs.setdefault("zz_connectivity", "fully_connected")
         return cls(**kwargs)
 
     @classmethod
@@ -417,11 +438,18 @@ class ReservoirParams:
         fixed_x_field = (self.fixed_x_field_base + self.fixed_x_field_std * rs.randn(n)) * self.fixed_x_field_scale
         input_z_field = (self.input_z_field_base + self.input_z_field_std * rs.randn(n)) * self.input_z_field_scale
 
-        # Standard open-boundary Ising chain: only nearest-neighbor ZZ couplings
-        # are active, with no wrap-around edge between the last and first qubit.
         coupling_graph = np.zeros((n, n), dtype=float)
-        for i in range(n - 1):
-            coupling_graph[i, i + 1] = 1.0
+        connectivity = str(self.zz_connectivity).lower()
+        if connectivity in {"open_chain", "chain"}:
+            for i in range(n - 1):
+                coupling_graph[i, i + 1] = 1.0
+        elif connectivity in {"fully_connected", "all_to_all"}:
+            coupling_graph[np.triu_indices(n, k=1)] = 1.0
+        else:
+            raise ValueError(
+                "zz_connectivity must be one of: open_chain, chain, "
+                "fully_connected, all_to_all"
+            )
 
         zz_coupling = self.zz_coupling_scale * (rs.rand(n, n) * coupling_graph)
         h0, h1 = self._ising_hamiltonian_specs(fixed_x_field, input_z_field, zz_coupling)

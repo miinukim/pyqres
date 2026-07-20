@@ -133,7 +133,7 @@ class ObservableChannelMapReservoirConfig(ChannelMapReservoirConfig):
 
 
 class ChannelMapReservoir:
-    """Exact expectation-value reservoir using the shared dense QRC model.
+    """Exact computational-basis probability reservoir.
 
     This class tracks only the reduced system density matrix between steps. The
     ancilla is freshly reset inside ExactQRCModel.exact_step_from_system, which
@@ -162,6 +162,14 @@ class ChannelMapReservoir:
         else:
             self.rhoS = np.asarray(rhoS0, dtype=complex)
         self.rhoSE = np.kron(self.rhoS, self.core.ancilla_reset_density)
+
+    def get_feature_names(self) -> list[str]:
+        """Return names for the readout bitstring probabilities."""
+
+        names = [f"p_{outcome:0{self.nA}b}" for outcome in range(self.core.dim_ancilla)]
+        if self.cfg.include_bias:
+            return ["bias", *names]
+        return names
 
     def _memory_channel(self, u: float, op_memory: np.ndarray) -> np.ndarray:
         return self.channel(u, op_memory)
