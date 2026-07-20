@@ -67,6 +67,7 @@ from .prethermal_shadow import (
     GlobalFloquetPartialShadowReservoir,
     InputEncodingConfig as PrethermalInputEncodingConfig,
     PartialShadowReadoutConfig,
+    PrethermalShadowDimensionModel,
     ReadoutResetConfig,
 )
 
@@ -106,6 +107,7 @@ __all__ = [
     "PauliTermLike",
     "PartialShadowReadoutConfig",
     "PrethermalInputEncodingConfig",
+    "PrethermalShadowDimensionModel",
     "PresetRegistryProtocol",
     "QRCReservoirProtocol",
     "QiskitArtifactMap",

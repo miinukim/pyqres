@@ -8,6 +8,7 @@ explicit dense PTM construction by generating only the observable-relevant
 operator sector under admissible zero-input drift and input-insertion words.
 """
 
+from collections import deque
 from dataclasses import dataclass
 from math import factorial
 from typing import Dict, List, Protocol, Sequence, Tuple
@@ -264,7 +265,9 @@ def _empty_result(
     )
 
 
-def _ambient_readout_matrix(observables: Sequence[np.ndarray]) -> np.ndarray:
+def ambient_readout_matrix(observables: Sequence[np.ndarray]) -> np.ndarray:
+    """Represent observable functionals in flattened Hilbert-Schmidt space."""
+
     if not observables:
         return np.zeros((0, 0), dtype=complex)
     # Flatten operators in Hilbert-Schmidt geometry so the nullspace calculation
@@ -436,10 +439,10 @@ class ObservableVolterraBasisBuilder:
     def build(self) -> Tuple[List[FeatureLabel], List[np.ndarray]]:
         basis: List[np.ndarray] = []
         labels: List[FeatureLabel] = []
-        stack: List[_ObservableWordState] = []
+        pending: deque[_ObservableWordState] = deque()
 
         for seed_index, observable in enumerate(self.seed_observables):
-            stack.append(
+            pending.append(
                 _ObservableWordState(
                     operator=np.asarray(observable, dtype=complex),
                     total_order=0,
@@ -449,8 +452,11 @@ class ObservableVolterraBasisBuilder:
                 )
             )
 
-        while stack:
-            state = stack.pop()
+        while pending:
+            # Breadth-first traversal keeps a bounded basis balanced across seed
+            # observables and word depths. Without a size bound, it spans the
+            # same admissible operator family as depth-first traversal.
+            state = pending.popleft()
             if state.total_order > 0:
                 # Only retain words with at least one insertion. Pure drift words
                 # correspond to the order-zero background/readout sector, whereas
@@ -466,7 +472,7 @@ class ObservableVolterraBasisBuilder:
                 # Appending 0 to the word means "apply one more zero-input
                 # adjoint step". Enumerating these steps explicitly makes the code
                 # follow the paper's sum m_j <= L truncation literally.
-                stack.append(
+                pending.append(
                     _ObservableWordState(
                         operator=self.model.channel_adjoint(self.expansion_point, state.operator),
                         total_order=state.total_order,
@@ -481,7 +487,7 @@ class ObservableVolterraBasisBuilder:
                 # Appending q means "apply the q-th insertion superoperator".
                 # The finite-difference derivative implements the paper's M_q
                 # without ever building a dense PTM/Liouville matrix.
-                stack.append(
+                pending.append(
                     _ObservableWordState(
                         operator=self.model.channel_derivative_adjoint(
                             q,
@@ -562,7 +568,7 @@ class VolterraAnalyzer:
         # flattening it gives both the ambient-space basis for angle diagnostics
         # and the latent-basis matrix consumed by the shared evaluation layer.
         latent_columns = np.column_stack([np.asarray(op, dtype=complex).reshape(-1) for op in basis_ops])
-        readout_nullspace = null_space(_ambient_readout_matrix(self.observables), tol=self.algebraic_tol)
+        readout_nullspace = null_space(ambient_readout_matrix(self.observables), tol=self.algebraic_tol)
 
         # In the observable-side methodology the orthonormalized basis itself is the
         # restricted-side basis, so the kernel-side and restricted-side visible
@@ -580,6 +586,7 @@ class VolterraAnalyzer:
 
 
 __all__ = [
+    "ambient_readout_matrix",
     "DenseVolterraAnalyzer",
     "PTMAffineExpansion",
     "ObservableVolterraBasisBuilder",

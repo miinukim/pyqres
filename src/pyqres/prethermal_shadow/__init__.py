@@ -7,11 +7,13 @@ from .config import (
     ReadoutResetConfig,
 )
 from .reservoir import GlobalFloquetPartialShadowReservoir
+from .dimension import PrethermalShadowDimensionModel
 
 __all__ = [
     "GlobalFloquetConfig",
     "GlobalFloquetPartialShadowReservoir",
     "InputEncodingConfig",
     "PartialShadowReadoutConfig",
+    "PrethermalShadowDimensionModel",
     "ReadoutResetConfig",
 ]

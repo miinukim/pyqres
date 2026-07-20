@@ -1,6 +1,7 @@
 """Public API for PTM, Volterra, visibility, and sweep-analysis tools."""
 
 from .analysis import (
+    ambient_readout_matrix,
     DenseVolterraAnalyzer,
     PTMAffineExpansion,
     TruncatedVolterraGenerator,
@@ -59,6 +60,7 @@ except Exception:  # pragma: no cover
 
 # Re-export the main analysis, model, and sweep entry points as the package public API.
 __all__ = [
+    "ambient_readout_matrix",
     "DenseVolterraAnalyzer",
     "PTMAffineExpansion",
     "TruncatedVolterraGenerator",

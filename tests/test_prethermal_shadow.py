@@ -178,6 +178,67 @@ def test_projected_channel_shape_and_spectrum():
     assert np.all(np.isfinite(lams))
 
 
+def test_dimension_model_matches_prethermal_memory_channel():
+    from pyqres.prethermal_shadow import PrethermalShadowDimensionModel
+
+    reservoir = small_reservoir(pauli_k=1, exact_expectations=True, return_shadow_estimates=False)
+    model = PrethermalShadowDimensionModel(reservoir)
+    rng = np.random.default_rng(41)
+    state = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    state = state @ state.conj().T
+    state /= np.trace(state)
+
+    expected = reservoir._memory_channel(state, u_bar=0.17)
+    actual = model.channel(0.17, state)
+
+    assert np.allclose(actual, expected, atol=1e-11)
+
+
+def test_induced_feature_observables_match_exact_stm_features():
+    from pyqres.prethermal_shadow import PrethermalShadowDimensionModel
+
+    reservoir = small_reservoir(pauli_k=1, exact_expectations=True, return_shadow_estimates=False)
+    model = PrethermalShadowDimensionModel(reservoir)
+    rng = np.random.default_rng(42)
+    state = rng.normal(size=(4, 4)) + 1j * rng.normal(size=(4, 4))
+    state = state @ state.conj().T
+    state /= np.trace(state)
+    expansion_point = -0.12
+
+    rho_pre = reservoir._pre_measurement_state(state, expansion_point)
+    expected = reservoir.exact_features_from_state(rho_pre)[1:]
+    observables = model.feature_observables(expansion_point)
+    actual = np.asarray([np.trace(observable @ state).real for observable in observables])
+
+    assert model.feature_observable_names() == reservoir.get_feature_names()[1:]
+    assert np.allclose(actual, expected, atol=1e-11)
+
+
+def test_prethermal_volterra_and_isotropy_metrics_smoke():
+    from pyqres.dim import VolterraAnalyzer, ambient_readout_matrix, compressed_visibility_diagnostics
+    from pyqres.prethermal_shadow import PrethermalShadowDimensionModel
+
+    reservoir = small_reservoir(pauli_k=1, exact_expectations=True, return_shadow_estimates=False)
+    model = PrethermalShadowDimensionModel(reservoir)
+    observables = model.feature_observables(0.0)[:3]
+    result = VolterraAnalyzer(
+        model,
+        observables=observables,
+        max_order=1,
+        lag_horizon=1,
+        max_basis_size=12,
+    ).analyze(n_shots=64)
+    diagnostics = compressed_visibility_diagnostics(
+        result.latent_basis_matrix,
+        ambient_readout_matrix(observables),
+    )
+
+    assert 0 <= result.ovd <= result.vvr <= result.latent_dim
+    assert diagnostics.s_gamma == result.latent_dim
+    assert diagnostics.visibility_angle_deg.shape == (result.latent_dim,)
+    assert np.all(np.isfinite(diagnostics.visibility_angle_deg))
+
+
 def test_reproducibility():
     inputs = np.linspace(-0.2, 0.2, 4)
     a = small_reservoir(pauli_k=1, measurement_type="weak", weak_strength=0.7, shots=32)
