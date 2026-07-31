@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import scipy.linalg as la
 
-from .config import GlobalFloquetConfig
+from .config import GlobalFloquetConfig, InputEncodingConfig
 
 
 PAULI = {
@@ -16,6 +16,9 @@ PAULI = {
     "Y": np.array([[0, -1j], [1j, 0]], dtype=complex),
     "Z": np.array([[1, 0], [0, -1]], dtype=complex),
 }
+
+PauliPlacements = tuple[tuple[int, str], ...]
+PauliTerm = tuple[float, PauliPlacements]
 
 
 def kron_all(ops: Sequence[np.ndarray]) -> np.ndarray:
@@ -28,14 +31,17 @@ def kron_all(ops: Sequence[np.ndarray]) -> np.ndarray:
 def pauli_string(n_qubits: int, placements: Sequence[tuple[int, str]]) -> np.ndarray:
     ops = [PAULI["I"] for _ in range(int(n_qubits))]
     for site, pauli in placements:
+        index = int(site)
+        if index < 0 or index >= int(n_qubits):
+            raise ValueError(f"Pauli placement qubit {index} is outside [0, {int(n_qubits) - 1}].")
         key = str(pauli).upper()
         if key not in PAULI or key == "I":
             raise ValueError(f"unsupported Pauli {pauli!r}")
-        ops[int(site)] = PAULI[key]
+        ops[index] = PAULI[key]
     return kron_all(ops)
 
 
-def parse_pauli_placements(spec: str) -> tuple[tuple[int, str], ...]:
+def parse_pauli_placements(spec: str) -> PauliPlacements:
     """Parse one Pauli string like ``0:Z,2:X`` into placements."""
 
     text = str(spec).strip()
@@ -51,6 +57,44 @@ def parse_pauli_placements(spec: str) -> tuple[tuple[int, str], ...]:
     return tuple(placements)
 
 
+def parse_pauli_terms(spec: str, *, normalize: bool = True) -> tuple[PauliTerm, ...]:
+    """Parse a weighted sum of Pauli strings without allocating dense matrices."""
+
+    text = str(spec).strip()
+    raw_terms = ("I",) if not text or text.upper() == "I" else text.replace("-", "+-").split("+")
+    combined: dict[PauliPlacements, float] = {}
+    for raw_term in raw_terms:
+        term = raw_term.strip()
+        if not term:
+            continue
+        if "*" in term:
+            coeff_text, pauli_text = term.split("*", 1)
+            coeff = float(coeff_text.strip())
+        else:
+            coeff = 1.0
+            pauli_text = term
+        placements = parse_pauli_placements(pauli_text)
+        by_site = {int(site): str(pauli).upper() for site, pauli in placements}
+        canonical = tuple(sorted(by_site.items()))
+        combined[canonical] = combined.get(canonical, 0.0) + coeff
+
+    terms = [(coeff, placements) for placements, coeff in combined.items() if abs(coeff) > 1e-15]
+    if normalize and terms:
+        norm = float(np.sqrt(sum(float(coeff) ** 2 for coeff, _ in terms)))
+        terms = [(float(coeff) / norm, placements) for coeff, placements in terms]
+    return tuple(terms)
+
+
+def pauli_terms_matrix(n_qubits: int, terms: Sequence[PauliTerm]) -> np.ndarray:
+    """Construct a dense Hermitian matrix from symbolic Pauli terms."""
+
+    dim = 2 ** int(n_qubits)
+    out = np.zeros((dim, dim), dtype=complex)
+    for coeff, placements in terms:
+        out += float(coeff) * pauli_string(int(n_qubits), placements)
+    return 0.5 * (out + out.conj().T)
+
+
 def parse_pauli_operator(
     n_qubits: int,
     spec: str,
@@ -63,30 +107,56 @@ def parse_pauli_operator(
     ``0.5*0:X + -1.2*2:Z``.
     """
 
-    text = str(spec).strip()
-    dim = 2 ** int(n_qubits)
-    if not text or text.upper() == "I":
-        out = np.eye(dim, dtype=complex)
-    else:
-        out = np.zeros((dim, dim), dtype=complex)
-        for raw_term in text.replace("-", "+-").split("+"):
-            term = raw_term.strip()
-            if not term:
-                continue
-            if "*" in term:
-                coeff_text, pauli_text = term.split("*", 1)
-                coeff = float(coeff_text.strip())
-            else:
-                coeff = 1.0
-                pauli_text = term
-            out += coeff * pauli_string(int(n_qubits), parse_pauli_placements(pauli_text))
-    out = 0.5 * (out + out.conj().T)
-    if normalize:
-        norm2 = np.real_if_close(np.trace(out.conj().T @ out) / dim)
-        norm = float(np.sqrt(max(float(norm2), 0.0)))
-        if norm > 1e-15:
-            out = out / norm
+    return pauli_terms_matrix(
+        int(n_qubits),
+        parse_pauli_terms(spec, normalize=normalize),
+    )
+
+
+def validate_axis(axis: str, name: str) -> str:
+    """Normalize and validate a single-qubit Pauli axis."""
+
+    out = str(axis).upper()
+    if out not in {"X", "Y", "Z"}:
+        raise ValueError(f"{name} must be x, y, or z.")
     return out
+
+
+def resolve_input_qubits(cfg: InputEncodingConfig, floquet: GlobalFloquetConfig) -> tuple[int, ...]:
+    """Resolve symbolic input targets to physical qubit indices."""
+
+    spec = cfg.input_qubits
+    if isinstance(spec, str):
+        key = spec.lower()
+        if key == "memory":
+            memory_qubits, _ = resolve_qubit_partition(floquet)
+            return memory_qubits
+        if key == "all":
+            return tuple(range(int(floquet.n_qubits)))
+        raise ValueError("input_qubits must be 'memory', 'all', or a sequence of indices.")
+    qubits = tuple(int(qubit) for qubit in spec)
+    if not qubits:
+        raise ValueError("input_qubits sequence must be non-empty.")
+    if len(set(qubits)) != len(qubits):
+        raise ValueError("input_qubits must not contain duplicates.")
+    if any(qubit < 0 or qubit >= int(floquet.n_qubits) for qubit in qubits):
+        raise ValueError("input_qubits contains an out-of-range qubit.")
+    return qubits
+
+
+def input_beta_array(cfg: InputEncodingConfig, n_targets: int) -> np.ndarray:
+    """Resolve deterministic or seeded per-target input strengths."""
+
+    if isinstance(cfg.beta, (int, float, np.floating)):
+        base = np.full(int(n_targets), float(cfg.beta), dtype=float)
+    else:
+        base = np.asarray(cfg.beta, dtype=float).reshape(-1)
+        if base.shape != (int(n_targets),):
+            raise ValueError(f"beta must be scalar or length {n_targets}.")
+    if not cfg.random_beta:
+        return base
+    rng = np.random.default_rng(int(cfg.seed))
+    return base * rng.uniform(0.5, 1.5, size=int(n_targets))
 
 
 def resolve_qubit_partition(cfg: GlobalFloquetConfig) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -250,30 +320,63 @@ def build_global_h0(
     break_coeffs: np.ndarray,
     edges: Sequence[tuple[int, int]],
 ) -> np.ndarray:
-    n = int(cfg.n_qubits)
-    dim = 2**n
-    out = np.zeros((dim, dim), dtype=complex)
+    return pauli_terms_matrix(
+        int(cfg.n_qubits),
+        global_h0_pauli_terms(
+            cfg,
+            h=h,
+            jz=jz,
+            jxy=jxy,
+            break_coeffs=break_coeffs,
+            edges=edges,
+        ),
+    )
+
+
+def global_h0_pauli_terms(
+    cfg: GlobalFloquetConfig,
+    *,
+    h: np.ndarray,
+    jz: np.ndarray,
+    jxy: np.ndarray,
+    break_coeffs: np.ndarray,
+    edges: Sequence[tuple[int, int]],
+) -> tuple[PauliTerm, ...]:
+    """Return the static prethermal Hamiltonian as symbolic Pauli terms."""
+
+    terms: list[PauliTerm] = []
     for i, coeff in enumerate(h):
-        out += float(coeff) * pauli_string(n, [(i, "Z")])
+        if float(coeff) != 0.0:
+            terms.append((float(coeff), ((i, "Z"),)))
     for e, (i, j) in enumerate(edges):
-        out += float(jz[e]) * pauli_string(n, [(i, "Z"), (j, "Z")])
-        out += float(jxy[e]) * pauli_string(n, [(i, "X"), (j, "X")])
-        out += float(jxy[e]) * pauli_string(n, [(i, "Y"), (j, "Y")])
+        if float(jz[e]) != 0.0:
+            terms.append((float(jz[e]), ((i, "Z"), (j, "Z"))))
+        if float(jxy[e]) != 0.0:
+            terms.append((float(jxy[e]), ((i, "X"), (j, "X"))))
+            terms.append((float(jxy[e]), ((i, "Y"), (j, "Y"))))
     axis = str(cfg.break_axis).upper()
     for i, coeff in enumerate(break_coeffs):
         if float(coeff) != 0.0:
-            out += float(coeff) * pauli_string(n, [(i, axis)])
-    return 0.5 * (out + out.conj().T)
+            terms.append((float(coeff), ((i, axis),)))
+    return tuple(terms)
 
 
 def build_drive_hamiltonian(cfg: GlobalFloquetConfig, drive_coeffs: np.ndarray) -> np.ndarray:
-    n = int(cfg.n_qubits)
-    dim = 2**n
-    out = np.zeros((dim, dim), dtype=complex)
+    return pauli_terms_matrix(
+        int(cfg.n_qubits),
+        drive_pauli_terms(cfg, drive_coeffs),
+    )
+
+
+def drive_pauli_terms(cfg: GlobalFloquetConfig, drive_coeffs: np.ndarray) -> tuple[PauliTerm, ...]:
+    """Return the square-drive Hamiltonian as symbolic Pauli terms."""
+
     axis = str(cfg.drive_axis).upper()
-    for i, coeff in enumerate(drive_coeffs):
-        out += float(coeff) * pauli_string(n, [(i, axis)])
-    return 0.5 * (out + out.conj().T)
+    return tuple(
+        (float(coeff), ((i, axis),))
+        for i, coeff in enumerate(drive_coeffs)
+        if float(coeff) != 0.0
+    )
 
 
 def fast_period(cfg: GlobalFloquetConfig) -> float:
@@ -401,6 +504,8 @@ def project_density(rho: np.ndarray, *, tol: float = 1e-12) -> np.ndarray:
 
 __all__ = [
     "PAULI",
+    "PauliPlacements",
+    "PauliTerm",
     "build_drive_hamiltonian",
     "build_fast_period_unitary",
     "build_global_h0",
@@ -411,16 +516,23 @@ __all__ = [
     "density_zero",
     "fast_period",
     "generate_hamiltonian_parameters",
+    "global_h0_pauli_terms",
+    "drive_pauli_terms",
+    "input_beta_array",
     "kron_all",
     "partial_trace_memory_first",
     "partial_trace_qubits",
     "pauli_string",
     "parse_pauli_operator",
     "parse_pauli_placements",
+    "parse_pauli_terms",
+    "pauli_terms_matrix",
     "project_density",
     "reorder_qubit_operator",
     "resolve_qubit_partition",
+    "resolve_input_qubits",
     "step_duration",
     "topology_edges",
     "validate_floquet_config",
+    "validate_axis",
 ]

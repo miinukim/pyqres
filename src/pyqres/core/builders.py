@@ -132,12 +132,14 @@ def _dataclass_kwargs(cls: type, values: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in values.items() if key in allowed}
 
 
-def _build_prethermal_shadow_reservoir(spec: ReservoirSpec) -> Any:
+def _build_prethermal_shadow_reservoir(spec: ReservoirSpec, backend: str) -> Any:
     from pyqres.prethermal_shadow import (
         GlobalFloquetConfig,
         GlobalFloquetPartialShadowReservoir,
         InputEncodingConfig,
         PartialShadowReadoutConfig,
+        PrethermalCircuitConfig,
+        QiskitGlobalFloquetPartialShadowReservoir,
         ReadoutResetConfig,
     )
 
@@ -146,6 +148,7 @@ def _build_prethermal_shadow_reservoir(spec: ReservoirSpec) -> Any:
     shadow = dict(model_kwargs.pop("shadow", {}))
     reset = dict(model_kwargs.pop("reset", {}))
     simulator = dict(model_kwargs.pop("simulator", {}))
+    circuit = dict(model_kwargs.pop("circuit", {}))
     if model_kwargs:
         floquet.update(model_kwargs)
 
@@ -171,13 +174,20 @@ def _build_prethermal_shadow_reservoir(spec: ReservoirSpec) -> Any:
     shadow.setdefault("include_bias", bool(spec.readout.include_bias))
     shadow.setdefault("shots", int(spec.readout.shots))
 
-    return GlobalFloquetPartialShadowReservoir(
+    configs = (
         GlobalFloquetConfig(**_dataclass_kwargs(GlobalFloquetConfig, floquet)),
         InputEncodingConfig(**_dataclass_kwargs(InputEncodingConfig, encoding)),
         PartialShadowReadoutConfig(**_dataclass_kwargs(PartialShadowReadoutConfig, shadow)),
         ReadoutResetConfig(**_dataclass_kwargs(ReadoutResetConfig, reset)),
-        **simulator,
     )
+    backend_key = str(backend).lower()
+    if backend_key in {"qiskit", "circuit", "mps"}:
+        circuit = {**circuit, **dict(spec.qiskit_kwargs), **simulator}
+        return QiskitGlobalFloquetPartialShadowReservoir(
+            *configs,
+            PrethermalCircuitConfig(**_dataclass_kwargs(PrethermalCircuitConfig, circuit)),
+        )
+    return GlobalFloquetPartialShadowReservoir(*configs, **simulator)
 
 
 def _hamiltonian_backend_kwargs(spec: ReservoirSpec) -> dict[str, Any]:
@@ -243,7 +253,7 @@ def compile_reservoir(spec: ReservoirSpec, backend: str = "exact") -> Any:
 
     backend_key = backend.lower()
     if spec.source_kind.lower() == "preset" and _preset_key(spec) in _PRETHERMAL_PRESETS:
-        return _build_prethermal_shadow_reservoir(spec)
+        return _build_prethermal_shadow_reservoir(spec, backend_key)
     if backend_key in {"exact", "dense"} and spec.readout.mode in {"memory_observables", "observables"}:
         backend_key = "memory_observable"
     readout = spec.readout

@@ -178,6 +178,7 @@ def _prethermal_model_kwargs(raw: dict[str, Any], preset_name: str) -> dict[str,
         "reset": "reset",
         "readout_reset": "reset",
         "simulator": "simulator",
+        "circuit": "circuit",
     }.items():
         if source in raw:
             out[target] = _as_mapping(raw.pop(source), name=source)

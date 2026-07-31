@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Configuration for global-Floquet partial-shadow reservoirs."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence
 
 
@@ -90,9 +90,30 @@ class ReadoutResetConfig:
     trace_readout_after_step: bool = True
 
 
+@dataclass(frozen=True)
+class PrethermalCircuitConfig:
+    """Compilation and execution settings for the Qiskit circuit backend."""
+
+    simulator_method: str = "matrix_product_state"
+    simulator_device: str = "automatic"
+    evolution_synthesis: str = "suzuki_trotter"
+    evolution_reps: int = 1
+    evolution_order: int = 2
+    evolution_insert_barriers: bool = False
+    evolution_preserve_order: bool = True
+    transpile_optimization_level: int = 1
+    circuit_batch_size: int = 32
+    shots_per_basis: int = 1
+    seed_simulator: int | None = None
+    mps_max_bond_dimension: int | None = None
+    mps_truncation_threshold: float | None = 1e-16
+    aer_options: dict[str, object] = field(default_factory=dict)
+
+
 __all__ = [
     "GlobalFloquetConfig",
     "InputEncodingConfig",
     "PartialShadowReadoutConfig",
+    "PrethermalCircuitConfig",
     "ReadoutResetConfig",
 ]

@@ -391,3 +391,150 @@ def test_manual_partition_filters_memory_readout_couplings():
         readout_qubits=(1, 3),
     )
     assert generate_hamiltonian_parameters(config)["edges"] == ((0, 2), (1, 3))
+
+
+def test_symbolic_pauli_terms_match_dense_operator():
+    from pyqres.prethermal_shadow.dynamics import parse_pauli_operator, parse_pauli_terms, pauli_terms_matrix
+
+    spec = "0.5*0:X,2:Z + -1.2*1:Y + 0.25*0:X,2:Z"
+    expected = parse_pauli_operator(3, spec, normalize=True)
+    actual = pauli_terms_matrix(3, parse_pauli_terms(spec, normalize=True))
+
+    assert np.allclose(actual, expected)
+
+
+def test_prethermal_circuit_builds_measurement_reset_stream():
+    pytest.importorskip("qiskit")
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        QiskitGlobalFloquetPartialShadowReservoir,
+    )
+
+    reservoir = QiskitGlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(
+            n_qubits=3,
+            n_memory=2,
+            n_readout=1,
+            readout_qubits=(1,),
+            omega=12.0,
+            n_cycles_per_step=2,
+            random_h=False,
+            random_jz=False,
+            random_jxy=False,
+            random_drive=False,
+        ),
+        InputEncodingConfig(operator="0:X + 2:X", beta=0.1, random_beta=False),
+        PartialShadowReadoutConfig(pauli_k=1, shots=4),
+    )
+    circuit = reservoir.build_streaming_circuit([0.1, -0.2], [["X"], ["Y"]])
+
+    assert reservoir.memory_qubits == (0, 2)
+    assert reservoir.readout_qubits == (1,)
+    assert circuit.num_clbits == 2
+    assert circuit.count_ops()["measure"] == 2
+    assert circuit.count_ops()["reset"] == 2
+    assert circuit.count_ops()["PauliEvolution"] == 10
+
+
+def test_prethermal_circuit_step_matches_dense_for_commuting_terms():
+    pytest.importorskip("qiskit")
+    from qiskit.quantum_info import Operator
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        GlobalFloquetPartialShadowReservoir,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        QiskitGlobalFloquetPartialShadowReservoir,
+    )
+    from pyqres.prethermal_shadow.dynamics import reorder_qubit_operator
+
+    floquet = GlobalFloquetConfig(
+        n_qubits=2,
+        n_memory=1,
+        n_readout=1,
+        omega=9.0,
+        n_cycles_per_step=2,
+        drive_axis="z",
+        jxy_scale=0.0,
+        break_scale=0.0,
+        random_h=False,
+        random_jz=False,
+        random_jxy=False,
+        random_drive=False,
+        random_break=False,
+    )
+    encoding = InputEncodingConfig(input_qubits="all", axis="z", beta=0.13, random_beta=False)
+    shadow = PartialShadowReadoutConfig(pauli_k=1, shots=4)
+    dense = GlobalFloquetPartialShadowReservoir(floquet, encoding, shadow)
+    circuit = QiskitGlobalFloquetPartialShadowReservoir(floquet, encoding, shadow)
+
+    qiskit_unitary = Operator(circuit.build_step_circuit(0.17).decompose(reps=10)).data
+    actual = reorder_qubit_operator(qiskit_unitary, (1, 0), (0, 1))
+    expected = dense.u_floquet_step @ dense._input_unitary(0.17)
+    phase = np.vdot(expected.reshape(-1), actual.reshape(-1))
+    actual = actual / (phase / abs(phase))
+
+    assert np.allclose(actual, expected, atol=1e-10)
+
+
+def test_prethermal_mps_execution_smoke():
+    pytest.importorskip("qiskit_aer")
+    from pyqres.prethermal_shadow import (
+        GlobalFloquetConfig,
+        InputEncodingConfig,
+        PartialShadowReadoutConfig,
+        PrethermalCircuitConfig,
+        QiskitGlobalFloquetPartialShadowReservoir,
+    )
+
+    reservoir = QiskitGlobalFloquetPartialShadowReservoir(
+        GlobalFloquetConfig(
+            n_qubits=3,
+            n_memory=2,
+            n_readout=1,
+            omega=12.0,
+            n_cycles_per_step=1,
+            random_h=False,
+            random_jz=False,
+            random_jxy=False,
+            random_drive=False,
+        ),
+        InputEncodingConfig(beta=0.05, random_beta=False),
+        PartialShadowReadoutConfig(pauli_k=1, shots=6, seed=71, return_raw_shots=True),
+        circuit_config=PrethermalCircuitConfig(
+            simulator_method="matrix_product_state",
+            circuit_batch_size=3,
+            shots_per_basis=2,
+            seed_simulator=72,
+        ),
+    )
+    progress_updates = []
+    features = reservoir.run_stream([0.1, -0.2], progress_callback=progress_updates.append)
+
+    assert features.shape == (2, 4)
+    assert np.all(np.isfinite(features))
+    assert reservoir.last_basis_schedules.shape == (6, 2, 1)
+    assert reservoir.last_outcomes.shape == (6, 2, 1)
+    assert sum(progress_updates) == reservoir.basis_circuit_count() == 3
+
+
+def test_standard_factory_builds_prethermal_mps_backend():
+    pytest.importorskip("qiskit")
+    import pyqres as qres
+
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "preset": "prethermal_shadow",
+            "memory_qubits": 2,
+            "readout_qubits": 1,
+            "backend": "qiskit",
+            "floquet": {"omega": 12.0, "n_cycles_per_step": 1},
+            "shadow": {"pauli_k": 1, "shots": 4},
+            "qiskit": {"simulator_method": "matrix_product_state", "circuit_batch_size": 2},
+        }
+    )
+
+    assert isinstance(reservoir, qres.QiskitGlobalFloquetPartialShadowReservoir)
+    assert reservoir.circuit_config.simulator_method == "matrix_product_state"

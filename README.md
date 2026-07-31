@@ -309,8 +309,10 @@ result = qres.Experiment(reservoir, dataset, readout=qres.Ridge(), metrics=["mse
 `pyqres.prethermal_shadow` provides a main-package reservoir for all-qubit
 fast-driven Floquet dynamics with partial local classical-shadow readout on a
 readout subset. Instantiate it directly and pass it to `qres.Experiment` as a
-custom reservoir object. The current implementation uses dense density matrices
-and does not require Qiskit.
+custom reservoir object. The dense implementation is the exact small-system
+reference and does not require Qiskit. A circuit implementation supports Aer
+MPS simulation and hardware-shaped execution with mid-circuit measurement and
+reset.
 
 Run the small smoke example:
 
@@ -369,6 +371,40 @@ X = res.run(inputs)
 assert X.shape[1] == 1 + (3 * 2 + 9)
 ```
 
+For larger locally entangled reservoirs, install `pyqres[qiskit]` and select the
+circuit backend:
+
+```python
+circuit_reservoir = qres.qresreservoir.from_dict({
+    "preset": "prethermal_shadow",
+    "memory_qubits": 8,
+    "readout_qubits": 2,
+    "backend": "qiskit",
+    "floquet": {
+        "omega": 12.0,
+        "n_cycles_per_step": 4,
+        "readout_qubits": [2, 3],
+    },
+    "shadow": {"pauli_k": 2, "shots": 1024},
+    "qiskit": {
+        "simulator_method": "matrix_product_state",
+        "evolution_synthesis": "suzuki_trotter",
+        "evolution_reps": 2,
+        "shots_per_basis": 16,
+        "mps_max_bond_dimension": 256,
+        "mps_truncation_threshold": 1e-10,
+    },
+})
+X = circuit_reservoir.run_stream(inputs)
+```
+
+Each basis circuit contains the full input sequence. It measures and resets only
+the configured readout qubits after every step, leaving memory qubits coherent.
+`shots_per_basis=1` gives an independently randomized basis schedule per shadow
+shot. Larger values reuse a schedule for several trajectories and reduce
+transpilation cost. Pass a Qiskit backend to `run_stream(inputs, backend=...)`
+for hardware that supports mid-circuit measurement and reset.
+
 Important behavior:
 
 - Memory qubits are laid out first and readout qubits are trailing by default.
@@ -380,7 +416,8 @@ Important behavior:
 - The global Floquet Hamiltonian acts on all `n_memory + n_readout` qubits,
   including readout qubits. There is no explicit transducer block.
 - Features are exact readout Pauli expectations or projective/weak local
-  partial-shadow estimates on the readout marginal.
+  partial-shadow estimates on the readout marginal. The circuit backend supports
+  projective shadows; weak and exact diagnostic modes remain dense-only.
 - After features are computed, readout is traced out and reset to `|0...0>` by
   default for the next step.
 - Feature columns are all non-identity readout Pauli strings up to `pauli_k`,
@@ -388,8 +425,10 @@ Important behavior:
 
 For customization, public helpers live in:
 
-- `pyqres.prethermal_shadow.dynamics`: dense Hamiltonians,
-  Floquet unitaries, partial traces, and reset states
+- `pyqres.prethermal_shadow.dynamics`: shared symbolic Pauli terms, dense
+  Hamiltonians, Floquet unitaries, partial traces, and reset states
+- `pyqres.prethermal_shadow.circuits`: Qiskit Floquet circuits, dynamic
+  measurement/reset, and Aer MPS execution
 - `pyqres.prethermal_shadow.shadows`: classical-shadow and partial
   weak-shadow feature helpers
 - `pyqres.prethermal_shadow.diagnostics`: projected memory-channel

@@ -17,14 +17,16 @@ from .dynamics import (
     density_plus,
     density_zero,
     generate_hamiltonian_parameters,
-    kron_all,
+    input_beta_array,
     partial_trace_qubits,
     pauli_string,
     parse_pauli_operator,
     project_density,
     reorder_qubit_operator,
+    resolve_input_qubits,
     resolve_qubit_partition,
     step_duration,
+    validate_axis,
     validate_floquet_config,
 )
 from .shadows import (
@@ -33,44 +35,6 @@ from .shadows import (
     partial_shadow_feature_names,
     sample_partial_shadow_features,
 )
-
-
-def _validate_axis(axis: str, name: str) -> str:
-    out = str(axis).upper()
-    if out not in {"X", "Y", "Z"}:
-        raise ValueError(f"{name} must be x, y, or z.")
-    return out
-
-
-def _resolve_input_qubits(cfg: InputEncodingConfig, floquet: GlobalFloquetConfig) -> tuple[int, ...]:
-    spec = cfg.input_qubits
-    if isinstance(spec, str):
-        key = spec.lower()
-        if key == "memory":
-            memory_qubits, _ = resolve_qubit_partition(floquet)
-            return memory_qubits
-        if key == "all":
-            return tuple(range(int(floquet.n_qubits)))
-        raise ValueError("input_qubits must be 'memory', 'all', or a sequence of indices.")
-    qubits = tuple(int(q) for q in spec)
-    if not qubits:
-        raise ValueError("input_qubits sequence must be non-empty.")
-    if any(q < 0 or q >= int(floquet.n_qubits) for q in qubits):
-        raise ValueError("input_qubits contains an out-of-range qubit.")
-    return qubits
-
-
-def _beta_array(cfg: InputEncodingConfig, n_targets: int) -> np.ndarray:
-    if isinstance(cfg.beta, (int, float, np.floating)):
-        base = np.full(int(n_targets), float(cfg.beta), dtype=float)
-    else:
-        base = np.asarray(cfg.beta, dtype=float).reshape(-1)
-        if base.shape != (int(n_targets),):
-            raise ValueError(f"beta must be scalar or length {n_targets}.")
-    if not cfg.random_beta:
-        return base
-    rng = np.random.default_rng(int(cfg.seed))
-    return base * rng.uniform(0.5, 1.5, size=int(n_targets))
 
 
 def _low_weight_labels(n_qubits: int, pauli_k: int) -> list[tuple[tuple[int, str], ...]]:
@@ -178,14 +142,14 @@ class GlobalFloquetPartialShadowReservoir:
 
         self.input_operator: np.ndarray | None = None
         if self.input_config.operator is None:
-            self.input_qubits = _resolve_input_qubits(self.input_config, floquet_config)
-            self.input_axis = _validate_axis(self.input_config.axis, "input axis")
-            self.beta = _beta_array(self.input_config, len(self.input_qubits))
+            self.input_qubits = resolve_input_qubits(self.input_config, floquet_config)
+            self.input_axis = validate_axis(self.input_config.axis, "input axis")
+            self.beta = input_beta_array(self.input_config, len(self.input_qubits))
         else:
             if not isinstance(self.input_config.beta, (int, float, np.floating)):
                 raise ValueError("operator input encoding requires scalar beta.")
             self.input_qubits = tuple()
-            self.input_axis = _validate_axis(self.input_config.axis, "input axis")
+            self.input_axis = validate_axis(self.input_config.axis, "input axis")
             self.beta = np.asarray([float(self.input_config.beta)], dtype=float)
             self.input_operator = parse_pauli_operator(
                 self.n_qubits,
