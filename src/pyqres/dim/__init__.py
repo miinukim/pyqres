@@ -1,12 +1,12 @@
 """Public API for PTM, Volterra, visibility, and sweep-analysis tools."""
 
 from .analysis import (
-    ambient_readout_matrix,
     DenseVolterraAnalyzer,
     PTMAffineExpansion,
     TruncatedVolterraGenerator,
     VolterraAnalyzer,
     VolterraResult,
+    ambient_readout_matrix,
 )
 from .isotropy import (
     CompressedVisibilityDiagnostics,
@@ -22,15 +22,23 @@ from .model import (
     SYKReservoirModel,
     SYKReservoirParameters,
 )
+
 try:  # pragma: no cover
-    from .qrclib_model import ExactQRCModel, ExactQRCModelConfig, QRCLibExactReservoirModel
+    from .qrclib_model import (
+        ExactQRCModel,
+        ExactQRCModelConfig,
+        QRCLibExactReservoirModel,
+    )
 except Exception:  # pragma: no cover
     # Keep the package importable even when the optional pyqres exact backend is absent.
     ExactQRCModel = None  # type: ignore
     ExactQRCModelConfig = None  # type: ignore
     QRCLibExactReservoirModel = None  # type: ignore
 try:  # pragma: no cover
-    from .streaming import MemoryObservableStreamingReservoir, SharedExactStreamingReservoir
+    from .streaming import (
+        MemoryObservableStreamingReservoir,
+        SharedExactStreamingReservoir,
+    )
 except Exception:  # pragma: no cover
     # Streaming depends on the same external backend and should fail soft as well.
     MemoryObservableStreamingReservoir = None  # type: ignore
@@ -60,31 +68,31 @@ except Exception:  # pragma: no cover
 
 # Re-export the main analysis, model, and sweep entry points as the package public API.
 __all__ = [
-    "ambient_readout_matrix",
+    "CompressedVisibilityDiagnostics",
+    "ConfigurableSweep",
     "DenseVolterraAnalyzer",
+    "ExactQRCModel",
+    "ExactQRCModelConfig",
+    "IsingReservoirModel",
+    "IsingReservoirParameters",
+    "LineMetricSpec",
+    "MemoryObservableStreamingReservoir",
     "PTMAffineExpansion",
+    "QRCLibExactReservoirModel",
+    "RandomPauliReservoirModel",
+    "RandomPauliReservoirParameters",
+    "ReservoirBase",
+    "SYKReservoirModel",
+    "SYKReservoirParameters",
+    "SharedExactStreamingReservoir",
+    "SweepExperiment",
     "TruncatedVolterraGenerator",
     "VolterraAnalyzer",
     "VolterraResult",
-    "CompressedVisibilityDiagnostics",
+    "ambient_readout_matrix",
+    "build_sweep",
     "compressed_visibility_diagnostics",
     "compressed_visibility_metrics",
-    "ReservoirBase",
-    "IsingReservoirModel",
-    "IsingReservoirParameters",
-    "SYKReservoirModel",
-    "SYKReservoirParameters",
-    "RandomPauliReservoirModel",
-    "RandomPauliReservoirParameters",
-    "QRCLibExactReservoirModel",
-    "MemoryObservableStreamingReservoir",
-    "SharedExactStreamingReservoir",
-    "ExactQRCModel",
-    "ExactQRCModelConfig",
-    "ConfigurableSweep",
-    "SweepExperiment",
-    "build_sweep",
-    "LineMetricSpec",
     "run_standard_analysis_sweep",
     "save_experiment_table",
     "save_line_metric_plot",

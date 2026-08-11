@@ -19,7 +19,9 @@ examples/*
 !examples/sweep_omega_prethermal.py
 !examples/sweep_shadow_strength.py
 docs/*
+!docs/architecture.md
 !docs/user_guide.md
 !docs/volterra_numerical_methods.md
 *.log
 tests/*
+!tests/test_module_organization.py

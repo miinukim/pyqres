@@ -1,10 +1,10 @@
 """Internal numerical utilities used by pyqres readout and baseline modules."""
 
-from .linear import ridge_regression_fit, ridge_regression_predict, r2_score, rmse
+from .linear import r2_score, ridge_regression_fit, ridge_regression_predict, rmse
 
 __all__ = [
+    "r2_score",
     "ridge_regression_fit",
     "ridge_regression_predict",
-    "r2_score",
     "rmse",
 ]

@@ -19,13 +19,13 @@ A normal pyqres workflow looks like this:
 ```text
 plain Python config
     -> qresreservoir.from_dict(...)
-    -> ReservoirSpec
-    -> compile_reservoir(...)
+       (builds a ReservoirSpec and calls compile_reservoir internally)
     -> backend reservoir object
-    -> qres.run(reservoir, inputs)
-    -> feature matrix
-    -> Experiment(...).run()
-    -> metrics, predictions, saved arrays
+    -> either qres.run(reservoir, inputs)
+       -> feature matrix
+    -> or Experiment(...).run()
+       -> ExperimentResult with features, predictions, and metrics
+       -> result.save(outdir) when persisted files are wanted
 ```
 
 There are four user-facing concepts:
@@ -91,9 +91,13 @@ Most users should interact with:
 import pyqres as qres
 
 reservoir = qres.qresreservoir.from_dict({...})
-features = qres.run(reservoir, inputs)
 result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
+
+Use `qres.run(reservoir, inputs)` instead when only the feature matrix is
+needed. Do not normally call it immediately before `Experiment.run()` on the
+same reservoir: the experiment runs the complete input stream itself, and some
+reservoir implementations retain their memory state between calls.
 
 The internal code is organized to support that surface.
 
@@ -128,10 +132,15 @@ The dictionary parser lives in `core/factory.py`.
 Important behavior:
 
 - `memory_qubits`, `n_memory`, `n_system`, and `system_qubits` are aliases.
-- `readout_qubits`, `n_readout`, `n_ancilla`, and `ancilla_qubits` are aliases.
+- At the top level, `readout_qubits`, `n_readout`, `n_ancilla`, and
+  `ancilla_qubits` are aliases for the number of readout qubits. The prethermal
+  `floquet.readout_qubits` field is different: it is an ordered list of physical
+  qubit indices.
 - Raw Qiskit circuits are detected by `num_qubits` and `to_instruction`.
 - Existing reservoir objects are detected by `run`, `run_stream`, `transform`,
-  or `step`.
+  or `step`. To work with `qres.run(...)` and `Experiment`, however, the object
+  must expose `run`, `run_stream`, or `transform`; `step` alone is not a runnable
+  reservoir contract.
 - Qiskit simulator options live under `qiskit`, `qiskit_kwargs`, or
   `simulator`, not inside Hamiltonian or preset parameters.
 
@@ -227,7 +236,8 @@ in `core/builders.py`.
 
 `compile_reservoir(spec, backend)` lives in `core/builders.py`.
 
-It chooses one of these backend families:
+For ordinary presets and Hamiltonian-based reservoirs, it chooses among these
+backend families:
 
 - `memory_observable` or `dim`
 
@@ -235,9 +245,24 @@ It chooses one of these backend families:
   backend that performed well on the Mackey-Glass example. It is CPU dense
   linear algebra today.
 
-- `exact`, `dense`, or `channel_map`
+- `exact`
 
-  Uses dense channel-map simulation from `pyqres.simulation`.
+  Uses `MemoryObservableStreamingReservoir` when `readout.mode` is
+  `memory_observables` or `observables`. This includes the default readout mode.
+  For other readout modes it uses dense `ChannelMapReservoir` simulation from
+  `pyqres.simulation`.
+
+- `dense`
+
+  Acts as an alias for the memory-observable path when `readout.mode` is
+  `memory_observables` or `observables`. Other readout modes are not currently
+  supported with this backend name; use `channel_map` for dense ancilla
+  probability features.
+
+- `channel_map`
+
+  Explicitly uses dense `ChannelMapReservoir` simulation from
+  `pyqres.simulation`.
 
 - `hardware` or `hardware_trajectory`
 
@@ -248,9 +273,15 @@ It chooses one of these backend families:
   Uses `QRCReservoir` from `pyqres.qiskit`. It can consume explicit Qiskit
   circuits or Hamiltonians converted to `SparsePauliOp`.
 
-- `object`
+- Existing object (`source_kind="object"`)
 
-  Returns the user-provided reservoir object directly.
+  Existing reservoir objects use `source_kind="object"` and are returned
+  directly before normal backend dispatch. This happens regardless of the
+  backend string supplied with that object.
+
+The `prethermal_shadow` preset has its own dispatch before these generic rules.
+It uses `QiskitGlobalFloquetPartialShadowReservoir` for `qiskit`, `circuit`, or
+`mps`, and the dense `GlobalFloquetPartialShadowReservoir` otherwise.
 
 Backend choice determines the runtime behavior, not the user task. The same
 Mackey-Glass dataset can be used with a dense reservoir, a Qiskit reservoir, or
@@ -269,8 +300,13 @@ Use direct simulation config classes when you need to customize:
 - input target register: `system`, `ancilla`, or `full`
 - amplitude state preparation or a custom input-unitary factory
 - projective versus weak ancilla measurement
-- post-measurement reset versus keep behavior
+- post-measurement reset or keep behavior in the low-level measurement core
 - measurement-conditioned feedback gates
+
+The current `ChannelMapReservoir` and observable channel-map stepping paths
+require `post_measurement_mode="reset"`. Although the lower-level measurement
+core can represent `keep`, the reduced-memory channel frontends cannot execute
+that mode yet.
 
 The relevant files are:
 
@@ -278,7 +314,7 @@ The relevant files are:
 src/pyqres/simulation/exact_qrc.py
 src/pyqres/simulation/channel_map.py
 src/pyqres/core/control.py
-src/pyqres/core/reservoir_params.py
+src/pyqres/core/reservoir_params/
 examples/custom_reservoir_input_measurement.py
 ```
 
@@ -383,7 +419,7 @@ construction. The implementation is split by responsibility:
 
 ```text
 src/pyqres/prethermal_shadow/config.py
-src/pyqres/prethermal_shadow/dynamics.py
+src/pyqres/prethermal_shadow/dynamics/
 src/pyqres/prethermal_shadow/shadows.py
 src/pyqres/prethermal_shadow/reservoir.py
 src/pyqres/prethermal_shadow/diagnostics.py
@@ -402,12 +438,16 @@ Key runtime semantics:
   Pauli expectations or as projective/weak local Pauli shadow estimates.
 - After feature extraction, readout is traced out and reset to `zero` or `plus`
   for the next step. The default reset state is `zero`.
-- Feature labels are all non-identity readout Pauli strings up to `pauli_k`,
-  with optional leading `bias`.
+- With the default `feature_scope="readout"`, feature labels are all
+  non-identity readout Pauli strings up to `pauli_k`, with an optional leading
+  `bias`.
+- `feature_scope="memory"` and `feature_scope="full"` are diagnostic modes and
+  require `exact_expectations=True`. Finite-shot shadow estimates support only
+  the readout scope.
 
 The customization surface is deliberately modular:
 
-- Use `dynamics.py` helpers for dense Hamiltonian/unitary construction and
+- Use `dynamics/` helpers for dense Hamiltonian/unitary construction and
   partial traces.
 - Use `shadows.py` helpers for projective and weak partial-shadow feature
   reconstruction.
@@ -497,6 +537,9 @@ metrics = score train/test predictions
 return ExperimentResult
 ```
 
+`Experiment.run()` does not write files. Call `result.save(outdir)` to create
+`metrics.json`, `metadata.json`, and `arrays.npz`.
+
 This is why task packages only need to return a `Dataset`. They do not need to
 know anything about quantum reservoirs.
 
@@ -575,7 +618,7 @@ adding task-specific assumptions to `compile_reservoir(...)`.
 
 ## Protocols
 
-`core/protocols.py` documents structural contracts. These are not heavy base
+`core/protocols/` documents structural contracts. These are not heavy base
 classes. They explain what shapes pyqres expects:
 
 - reservoir objects

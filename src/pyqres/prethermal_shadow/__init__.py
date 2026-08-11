@@ -1,5 +1,6 @@
 """Global-Floquet partial-shadow reservoir API."""
 
+from .circuits import QiskitGlobalFloquetPartialShadowReservoir
 from .config import (
     GlobalFloquetConfig,
     InputEncodingConfig,
@@ -7,9 +8,8 @@ from .config import (
     PrethermalCircuitConfig,
     ReadoutResetConfig,
 )
-from .circuits import QiskitGlobalFloquetPartialShadowReservoir
-from .reservoir import GlobalFloquetPartialShadowReservoir
 from .dimension import PrethermalShadowDimensionModel
+from .reservoir import GlobalFloquetPartialShadowReservoir
 
 __all__ = [
     "GlobalFloquetConfig",

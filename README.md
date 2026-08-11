@@ -79,6 +79,8 @@ python -m pip install -e ../pyqres-tasks
 
 For a developer-oriented walkthrough of how the package fits together, see
 [`docs/user_guide.md`](docs/user_guide.md).
+For a concise source tree and dependency map, see
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Reservoir Dictionaries
 
