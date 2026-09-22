@@ -182,6 +182,13 @@ class PrethermalShadowDimensionModel:
         )
         return ensure_finite("induced readout observable", 0.5 * (out + out.conj().T))
 
+    def backward_image_readout(
+        self, readout_observable: np.ndarray, u: float = 0.0
+    ) -> np.ndarray:
+        """Return Eq. (16)'s exact backward image on persistent memory."""
+
+        return self._induced_readout_observable(readout_observable, float(u))
+
     def _induced_memory_observable(self, memory_observable: np.ndarray, u: float) -> np.ndarray:
         blocks = self._kraus_blocks(float(u))
         out = np.einsum(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Global-Floquet reservoir with partial classical-shadow readout."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from itertools import combinations, product
 
 import numpy as np
@@ -28,6 +28,7 @@ from .dynamics import (
     step_duration,
     validate_axis,
     validate_floquet_config,
+    validate_hamiltonian_parameters,
 )
 from .shadows import (
     exact_readout_expectations,
@@ -77,6 +78,7 @@ class GlobalFloquetPartialShadowReservoir:
         reset_config: ReadoutResetConfig | None = None,
         simulator_method: str = "density_matrix",
         seed_simulator: int | None = None,
+        hamiltonian_parameters: Mapping[str, object] | None = None,
     ):
         validate_floquet_config(floquet_config)
         if simulator_method != "density_matrix":
@@ -122,7 +124,11 @@ class GlobalFloquetPartialShadowReservoir:
         if self.reset_config.reset_state not in {"zero", "plus"}:
             raise ValueError("reset_state must be 'zero' or 'plus'.")
 
-        params = generate_hamiltonian_parameters(floquet_config)
+        params = (
+            generate_hamiltonian_parameters(floquet_config)
+            if hamiltonian_parameters is None
+            else validate_hamiltonian_parameters(floquet_config, hamiltonian_parameters)
+        )
         self.edges = params["edges"]
         self.h = np.asarray(params["h"], dtype=float)
         self.jz = np.asarray(params["jz"], dtype=float)

@@ -44,6 +44,209 @@ def test_imports_do_not_require_qiskit():
     assert PartialShadowReadoutConfig().measurement_type == "projective"
 
 
+def test_asymmetric_anchor_uses_boundary_bond_and_directed_drive():
+    from pyqres.prethermal_shadow import build_asymmetric_anchor_reservoir
+
+    reservoir, metadata = build_asymmetric_anchor_reservoir(
+        n_memory=2,
+        n_readout=2,
+        omega=15.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.025,
+        interface_jz=1.2,
+        drive_amplitude=0.7,
+    )
+
+    assert (metadata.anchor_qubit, metadata.readout_qubit) == (1, 2)
+    assert reservoir.edges[metadata.interface_edge_index] == (1, 2)
+    assert reservoir.jxy[metadata.interface_edge_index] == pytest.approx(0.025)
+    assert reservoir.jz[metadata.interface_edge_index] == pytest.approx(1.2)
+    assert reservoir.drive_coeffs[metadata.anchor_qubit] == pytest.approx(0.0)
+    assert reservoir.drive_coeffs[metadata.readout_qubit] == pytest.approx(0.7)
+
+
+def test_anchor_mode_uses_traceless_observable_quotient():
+    from pyqres.prethermal_shadow import (
+        build_asymmetric_anchor_reservoir,
+        slow_mode_diagnostics,
+    )
+
+    reservoir, metadata = build_asymmetric_anchor_reservoir(
+        n_memory=1,
+        n_readout=1,
+        omega=15.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.01,
+    )
+    diagnostics = slow_mode_diagnostics(reservoir, metadata)
+
+    assert diagnostics["anchor_overlap"] > 0.999
+    assert diagnostics["channel_gap"] > 0.0
+    assert diagnostics["channel_gap"] < 1e-3
+    assert diagnostics["normalized_visibility"] > 0.1
+    assert diagnostics["eigen_residual"] < 1e-10
+
+
+def test_weak_interface_has_linear_dressing_and_quadratic_gap_locally():
+    from pyqres.prethermal_shadow import (
+        build_asymmetric_anchor_reservoir,
+        slow_mode_diagnostics,
+    )
+
+    values = []
+    for coupling in (0.005, 0.01):
+        reservoir, metadata = build_asymmetric_anchor_reservoir(
+            n_memory=1,
+            n_readout=1,
+            omega=15.0,
+            n_cycles_per_step=1,
+            interface_jxy=coupling,
+        )
+        values.append(slow_mode_diagnostics(reservoir, metadata))
+
+    dressing_ratio = values[1]["dressing_norm"] / values[0]["dressing_norm"]
+    gap_ratio = values[1]["channel_gap"] / values[0]["channel_gap"]
+    assert dressing_ratio == pytest.approx(2.0, rel=0.02)
+    assert gap_ratio == pytest.approx(4.0, rel=0.02)
+
+
+def test_pauli_weight_distribution_recovers_single_site_weight():
+    from pyqres.prethermal_shadow import pauli_weight_distribution
+    from pyqres.prethermal_shadow.dynamics import pauli_string
+
+    distribution = pauli_weight_distribution(
+        pauli_string(2, [(0, "X")]),
+        n_qubits=2,
+    )
+
+    assert np.allclose(distribution, [0.0, 1.0, 0.0])
+
+
+def test_first_order_floquet_error_decreases_with_frequency():
+    from pyqres.prethermal_shadow import (
+        build_asymmetric_anchor_reservoir,
+        floquet_effective_diagnostics,
+    )
+
+    errors = []
+    for omega in (8.0, 30.0):
+        reservoir, metadata = build_asymmetric_anchor_reservoir(
+            n_memory=1,
+            n_readout=1,
+            omega=omega,
+            n_cycles_per_step=1,
+            interface_jxy=0.05,
+        )
+        diagnostics = floquet_effective_diagnostics(
+            reservoir,
+            {"Z_m": ((metadata.anchor_qubit, "Z"),)},
+        )
+        errors.append(diagnostics["unitary_error"]["frobenius"])
+
+    assert errors[1] < errors[0]
+
+
+def test_anchor_branch_tracks_from_conserved_all_to_all_limit():
+    from pyqres.prethermal_shadow import (
+        PrethermalShadowDimensionModel,
+        build_asymmetric_anchor_reservoir,
+        identify_anchor_mode,
+        slow_mode_visibility,
+    )
+
+    baseline, baseline_metadata = build_asymmetric_anchor_reservoir(
+        n_memory=2,
+        n_readout=2,
+        omega=15.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.0,
+        topology="all_to_all",
+        randomize_bulk=True,
+        seed=11,
+    )
+    reference = identify_anchor_mode(
+        PrethermalShadowDimensionModel(baseline),
+        anchor_memory_index=baseline_metadata.anchor_memory_index,
+    )
+    reservoir, metadata = build_asymmetric_anchor_reservoir(
+        n_memory=2,
+        n_readout=2,
+        omega=15.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.02,
+        topology="all_to_all",
+        randomize_bulk=True,
+        seed=11,
+    )
+    model = PrethermalShadowDimensionModel(reservoir)
+    mode = identify_anchor_mode(
+        model,
+        anchor_memory_index=metadata.anchor_memory_index,
+        reference_operator=reference.operator,
+    )
+    visibility = slow_mode_visibility(
+        model,
+        mode,
+        readout_local_index=metadata.readout_local_index,
+    )
+
+    assert mode.anchor_overlap > 0.99
+    assert mode.spectral_isolation > 0.0
+    assert np.isfinite(mode.eigenbasis_condition)
+    assert visibility["biorthogonal_projection_abs"] > 0.0
+
+
+def test_fixed_degree_interface_preserves_anchor_local_environment():
+    from pyqres.prethermal_shadow import build_asymmetric_anchor_reservoir
+
+    reservoir, metadata = build_asymmetric_anchor_reservoir(
+        n_memory=2,
+        n_readout=3,
+        omega=30.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.05,
+        topology="all_to_all",
+        isolate_anchor_diagonal=True,
+        interface_readout_bulk_degree=1,
+    )
+    active_readout_bulk_bonds = 0
+    for index, edge in enumerate(reservoir.edges):
+        if metadata.anchor_qubit in edge and index != metadata.interface_edge_index:
+            assert reservoir.jz[index] == pytest.approx(0.0)
+            assert reservoir.jxy[index] == pytest.approx(0.0)
+        if metadata.readout_qubit in edge and index != metadata.interface_edge_index:
+            if abs(reservoir.jz[index]) > 0.0 or abs(reservoir.jxy[index]) > 0.0:
+                active_readout_bulk_bonds += 1
+    assert active_readout_bulk_bonds == 1
+
+
+def test_impulse_response_returns_exact_and_modal_delay_curves():
+    from pyqres.prethermal_shadow import (
+        build_asymmetric_anchor_reservoir,
+        impulse_response_diagnostics,
+    )
+
+    reservoir, metadata = build_asymmetric_anchor_reservoir(
+        n_memory=1,
+        n_readout=1,
+        omega=15.0,
+        n_cycles_per_step=1,
+        interface_jxy=0.02,
+    )
+    result = impulse_response_diagnostics(
+        reservoir,
+        metadata,
+        input_amplitude=0.01,
+        max_delay=5,
+    )
+
+    assert result["delays"].tolist() == [1, 2, 3, 4, 5]
+    assert result["exact_signal"].shape == (5,)
+    assert result["modal_signal"].shape == (5,)
+    assert result["source_amplitude_abs"] > 0.0
+    assert np.isfinite(result["tail_relative_modal_error"])
+
+
 def test_experimental_import_path_is_not_provided():
     with pytest.raises(ModuleNotFoundError):
         __import__("pyqres.experimental")
@@ -192,6 +395,79 @@ def test_reset_channel_density_properties():
     assert np.isclose(np.trace(rho), 1.0)
     assert np.allclose(rho, rho.conj().T)
     assert np.min(np.linalg.eigvalsh(rho)) >= -1e-10
+
+
+def test_paper_reset_covariance_and_interface_jump_match_supplement():
+    from pyqres.prethermal_shadow import paper_interface_gksl_diagnostics
+
+    diagnostics = paper_interface_gksl_diagnostics(
+        (0.0125, 0.025, 0.05),
+        interface_jxy=0.08,
+        directed_eta=0.4,
+        interface_jz=0.7,
+        reverse_eta=0.03,
+    )
+
+    expected_covariance = np.asarray(
+        [[1.0, 1.0j, 0.0], [-1.0j, 1.0, 0.0], [0.0, 0.0, 0.0]],
+        dtype=complex,
+    )
+    assert np.allclose(diagnostics["covariance_matrix"], expected_covariance)
+    assert np.allclose(diagnostics["covariance_eigenvalues"], (0.0, 0.0, 2.0))
+    assert diagnostics["jump_formula_relative_error"] < 1e-14
+
+
+def test_paper_finite_collision_gksl_error_is_third_order_and_cptp():
+    from pyqres.prethermal_shadow import paper_interface_gksl_diagnostics
+
+    diagnostics = paper_interface_gksl_diagnostics(
+        (0.00625, 0.0125, 0.025, 0.05),
+        interface_jxy=0.08,
+        directed_eta=0.4,
+        interface_jz=0.7,
+        reverse_eta=0.03,
+        memory_field=0.6,
+        readout_field=0.2,
+    )
+
+    assert diagnostics["gksl_error_scaling_exponent"] == pytest.approx(3.0, abs=0.02)
+    assert diagnostics["second_order_error_scaling_exponent"] == pytest.approx(
+        3.0, abs=0.02
+    )
+    assert diagnostics["literal_main_text_error_scaling_exponent"] == pytest.approx(
+        2.0, abs=0.03
+    )
+    for record in diagnostics["records"]:
+        assert record["exact_tp_residual"] < 1e-12
+        assert record["gksl_tp_residual"] < 1e-12
+        assert record["exact_choi_min_eigenvalue"] > -1e-12
+        assert record["gksl_choi_min_eigenvalue"] > -1e-12
+
+
+def test_stm_reservoir_step_gksl_diagnostic_uses_full_cycle_block():
+    from pyqres.prethermal_shadow import reservoir_step_gksl_diagnostics
+
+    reservoir = small_reservoir(
+        pauli_k=1,
+        exact_expectations=True,
+        return_shadow_estimates=False,
+    )
+    diagnostics = reservoir_step_gksl_diagnostics(
+        reservoir,
+        duration_fractions=(1.0 / 64.0, 1.0 / 32.0, 1.0 / 16.0, 1.0 / 8.0),
+    )
+
+    assert diagnostics["configured_cycles_per_step"] == 1
+    assert diagnostics["practical_collision_duration"] == pytest.approx(
+        2.0 * np.pi / reservoir.floquet_config.omega
+    )
+    assert diagnostics["small_duration_error_exponent"] == pytest.approx(
+        3.0, abs=0.15
+    )
+    assert len(diagnostics["cycle_records"]) == 1
+    for record in diagnostics["fraction_records"]:
+        assert record["gksl_tp_residual"] < 1e-11
+        assert record["gksl_choi_min_eigenvalue"] > -1e-10
 
 
 def test_projected_channel_shape_and_spectrum():

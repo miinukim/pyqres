@@ -34,6 +34,7 @@ from .parameters import (
     resolve_qubit_partition,
     topology_edges,
     validate_floquet_config,
+    validate_hamiltonian_parameters,
 )
 from .states import (
     combine_subsystem_states,
@@ -78,6 +79,7 @@ __all__ = [
     "topology_edges",
     "validate_axis",
     "validate_floquet_config",
+    "validate_hamiltonian_parameters",
 ]
 
 # Retain the original public module metadata for introspection and pickling.

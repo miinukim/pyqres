@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
@@ -220,3 +220,49 @@ def generate_hamiltonian_parameters(
         "drive_coeffs": float(cfg.drive_amplitude) * drive.astype(float),
         "break_coeffs": float(cfg.break_scale) * break_coeffs.astype(float),
     }
+
+
+def validate_hamiltonian_parameters(
+    cfg: GlobalFloquetConfig,
+    parameters: Mapping[str, object],
+) -> dict[str, np.ndarray | tuple[tuple[int, int], ...]]:
+    """Validate explicit coefficients for a configured Floquet topology."""
+
+    validate_floquet_config(cfg)
+    _, readout_qubits = resolve_qubit_partition(cfg)
+    expected_edges = topology_edges(
+        int(cfg.n_qubits),
+        int(cfg.n_memory),
+        str(cfg.topology),
+        bool(cfg.include_mr_couplings),
+        readout_qubits=readout_qubits,
+    )
+    try:
+        edges = tuple(
+            (int(edge[0]), int(edge[1]))  # type: ignore[index]
+            for edge in parameters["edges"]  # type: ignore[union-attr]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("parameters['edges'] must be a sequence of qubit pairs") from exc
+    if edges != expected_edges:
+        raise ValueError("explicit Hamiltonian edges do not match the configured topology")
+
+    sizes = {
+        "h": int(cfg.n_qubits),
+        "jz": len(edges),
+        "jxy": len(edges),
+        "drive_coeffs": int(cfg.n_qubits),
+        "break_coeffs": int(cfg.n_qubits),
+    }
+    result: dict[str, np.ndarray | tuple[tuple[int, int], ...]] = {"edges": edges}
+    for name, size in sizes.items():
+        try:
+            values = np.asarray(parameters[name], dtype=float).reshape(-1)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"parameters[{name!r}] must be a numeric vector") from exc
+        if values.shape != (size,):
+            raise ValueError(f"parameters[{name!r}] must have shape {(size,)}")
+        if not np.isfinite(values).all():
+            raise ValueError(f"parameters[{name!r}] contains non-finite values")
+        result[name] = values.copy()
+    return result
