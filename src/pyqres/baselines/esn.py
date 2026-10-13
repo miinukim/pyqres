@@ -1,10 +1,20 @@
 """Echo-state network baselines for QRC benchmarks."""
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, Literal, Sequence
+from typing import Literal
+
 import numpy as np
-from ..utils.linear import ridge_regression_fit, ridge_regression_predict, rmse, r2_score
+
+from ..utils.linear import (
+    r2_score,
+    ridge_regression_fit,
+    ridge_regression_predict,
+    rmse,
+)
+
 
 @dataclass
 class ESNConfig:
@@ -18,6 +28,7 @@ class ESNConfig:
     seed: int = 7
     state_clip: float = 5.0
     power_iter: int = 200
+
 
 '''
 def _spectral_radius_power_iter(A: np.ndarray, seed: int, n_iter: int = 200) -> float:
@@ -87,22 +98,28 @@ class EchoStateNetwork:
         # Generate random reservoir
         W = rng.normal(0.0, 1.0, size=(n, n)).astype(np.float64)
 
-        # Gershgorin / infinity-norm bound (safe upper bound)
-        # This is cheaper and more robust than exact eigenvalue scaling for the
-        # small baseline role the ESN plays here.
-        row_sum = np.sum(np.abs(W), axis=1)
-        rho_bound = float(np.max(row_sum))
-
-        if not np.isfinite(rho_bound) or rho_bound <= 1e-12:
-            rho_bound = 1.0
-
-        # Scale to desired spectral radius
-        W *= (cfg.spectral_radius / rho_bound)
+        # Scale by the actual spectral radius. Using the infinity-norm bound
+        # here would systematically undershoot the requested value and unfairly
+        # shorten the memory of small, resource-matched ESN baselines.
+        eigenvalues = np.linalg.eigvals(W)
+        radius = float(np.max(np.abs(eigenvalues)))
+        if not np.isfinite(radius) or radius <= 1e-12:
+            raise FloatingPointError(
+                "Could not determine a finite ESN spectral radius."
+            )
+        W *= cfg.spectral_radius / radius
 
         self.W_res = W
 
-        self.W_in = cfg.input_scale * rng.normal(0.0, 1.0, size=(n, 2)).astype(np.float64)
-        self.x = np.zeros(n, dtype=np.float64)
+        self.W_in = cfg.input_scale * rng.normal(0.0, 1.0, size=(n, 2)).astype(
+            np.float64
+        )
+        self.reset_state()
+
+    def reset_state(self) -> None:
+        """Reset the recurrent state before processing an independent stream."""
+
+        self.x = np.zeros(self.cfg.n_res, dtype=np.float64)
 
     def step(self, u: float) -> np.ndarray:
         """Advance the ESN by one scalar input and return a copy of the state."""
@@ -112,11 +129,15 @@ class EchoStateNetwork:
         # Some BLAS backends can raise spurious divide/underflow flags in matmul when
         # global np.seterr(all="raise") is enabled. Ignore flags locally and validate
         # finiteness explicitly below.
-        with np.errstate(divide="ignore", over="ignore", under="ignore", invalid="ignore"):
+        with np.errstate(
+            divide="ignore", over="ignore", under="ignore", invalid="ignore"
+        ):
             pre = self.W_res @ self.x + self.W_in @ inp
 
         if not np.isfinite(pre).all():
-            raise FloatingPointError("ESN pre-activation became non-finite. Reduce spectral_radius/input_scale.")
+            raise FloatingPointError(
+                "ESN pre-activation became non-finite. Reduce spectral_radius/input_scale."
+            )
 
         x_new = np.tanh(pre)
         # Leaky integration interpolates between previous state and nonlinear
@@ -128,24 +149,38 @@ class EchoStateNetwork:
             self.x = np.clip(self.x, -cfg.state_clip, cfg.state_clip)
 
         if not np.isfinite(self.x).all():
-            raise FloatingPointError("ESN state became non-finite. Reduce spectral_radius/input_scale.")
+            raise FloatingPointError(
+                "ESN state became non-finite. Reduce spectral_radius/input_scale."
+            )
         return self.x.copy()
 
     def collect_states(self, u_seq: Sequence[float]) -> np.ndarray:
-        """Run an input sequence and return bias-augmented state features."""
+        """Reset, run an input sequence, and return bias-augmented features."""
 
+        self.reset_state()
         X = []
         for u in u_seq:
             X.append(self.step(float(u)))
+        if not X:
+            return np.empty((0, self.cfg.n_res + 1), dtype=float)
         X = np.vstack(X)
         X = np.hstack([np.ones((X.shape[0], 1)), X])
         if not np.isfinite(X).all():
             raise FloatingPointError("ESN produced non-finite states matrix X.")
         return X
 
-def run_stm_esn(T_total: int, washout: int, train_len: int, test_len: int, delays: Sequence[int],
-                input_dist: Literal["uniform_pm1","gaussian"], input_seed: int,
-                esn_cfg: ESNConfig, metric: Literal["r2","rmse"]="r2") -> Dict[int, Dict[str, float]]:
+
+def run_stm_esn(
+    T_total: int,
+    washout: int,
+    train_len: int,
+    test_len: int,
+    delays: Sequence[int],
+    input_dist: Literal["uniform_pm1", "gaussian"],
+    input_seed: int,
+    esn_cfg: ESNConfig,
+    metric: Literal["r2", "rmse"] = "r2",
+) -> dict[int, dict[str, float]]:
     """Evaluate the ESN on the short-term memory benchmark."""
 
     rng = np.random.default_rng(input_seed)
@@ -158,7 +193,7 @@ def run_stm_esn(T_total: int, washout: int, train_len: int, test_len: int, delay
     t0 = washout
     t_train_end = t0 + train_len
     t_test_end = t_train_end + test_len
-    out: Dict[int, Dict[str, float]] = {}
+    out: dict[int, dict[str, float]] = {}
     for d in delays:
         # For delay d, the target at time t is the input observed at t-d.
         t_start = max(t0, d)
@@ -170,11 +205,15 @@ def run_stm_esn(T_total: int, washout: int, train_len: int, test_len: int, delay
         yhat_tr = ridge_regression_predict(X[tr], w)
         yhat_te = ridge_regression_predict(X[te], w)
         if metric == "r2":
-            out[d] = {"train_score": float(r2_score(y_tr, yhat_tr)),
-                      "test_score": float(r2_score(y_te, yhat_te))}
+            out[d] = {
+                "train_score": float(r2_score(y_tr, yhat_tr)),
+                "test_score": float(r2_score(y_te, yhat_te)),
+            }
         else:
-            out[d] = {"train_score": float(-rmse(yhat_tr, y_tr)),
-                      "test_score": float(-rmse(yhat_te, y_te))}
+            out[d] = {
+                "train_score": float(-rmse(yhat_tr, y_tr)),
+                "test_score": float(-rmse(yhat_te, y_te)),
+            }
     return out
 
 
@@ -187,7 +226,7 @@ def run_channel_equalization_esn(
     esn_cfg: ESNConfig,
     ridge_l2: float = 1e-6,
     metric: Literal["ber", "mse"] = "ber",
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Evaluate the ESN on binary channel equalization."""
 
     observed = np.asarray(observed, dtype=float).reshape(-1)

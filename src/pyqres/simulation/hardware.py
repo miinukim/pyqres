@@ -44,6 +44,7 @@ class HardwareTrajectoryReservoir:
     def run(self, inputs: Sequence[float]) -> np.ndarray:
         """Sample shots independent trajectories over the same input stream."""
 
+        self.rng = np.random.default_rng(self.cfg.seed)
         values = _as_input_vector(inputs)
         counts = np.zeros((values.size, self.core.dim_ancilla), dtype=int)
         for _ in range(int(self.cfg.shots)):

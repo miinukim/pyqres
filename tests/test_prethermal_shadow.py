@@ -63,6 +63,7 @@ def test_asymmetric_anchor_uses_boundary_bond_and_directed_drive():
     assert reservoir.jz[metadata.interface_edge_index] == pytest.approx(1.2)
     assert reservoir.drive_coeffs[metadata.anchor_qubit] == pytest.approx(0.0)
     assert reservoir.drive_coeffs[metadata.readout_qubit] == pytest.approx(0.7)
+    np.testing.assert_allclose(reservoir.break_coeffs, 0.0)
 
 
 def test_anchor_mode_uses_traceless_observable_quotient():
@@ -243,6 +244,7 @@ def test_impulse_response_returns_exact_and_modal_delay_curves():
     assert result["delays"].tolist() == [1, 2, 3, 4, 5]
     assert result["exact_signal"].shape == (5,)
     assert result["modal_signal"].shape == (5,)
+    assert result["readout_axis"] == "Y"
     assert result["source_amplitude_abs"] > 0.0
     assert np.isfinite(result["tail_relative_modal_error"])
 

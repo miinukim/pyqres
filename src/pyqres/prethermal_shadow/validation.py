@@ -77,7 +77,7 @@ def asymmetric_anchor_parameters(
     anchor_memory_index: int = -1,
     readout_local_index: int = 0,
     anchor_jxy: float | None = None,
-    anchor_break: float | None = None,
+    anchor_break: float | None = 0.0,
     anchor_drive: float = 0.0,
     readout_drive: float | None = None,
     isolate_anchor_diagonal: bool = False,
@@ -134,7 +134,9 @@ def asymmetric_anchor_parameters(
     breaking = np.asarray(parameters["break_coeffs"], dtype=float).copy()
 
     weak_anchor = weak if anchor_jxy is None else float(anchor_jxy)
-    weak_break = weak if anchor_break is None else float(anchor_break)
+    # Symmetry breaking is opt-in.  Treat None as zero as well so callers
+    # cannot accidentally reintroduce a breaking field by omitting the value.
+    weak_break = 0.0 if anchor_break is None else float(anchor_break)
     for edge_index, edge in enumerate(edges):
         if anchor_qubit in edge:
             jxy[edge_index] = weak_anchor
@@ -189,7 +191,7 @@ def build_asymmetric_anchor_reservoir(
     bulk_jz: float = 0.3,
     bulk_jxy: float = 0.15,
     drive_amplitude: float = 0.7,
-    bulk_break: float = 0.01,
+    bulk_break: float = 0.0,
     anchor_memory_index: int = -1,
     readout_local_index: int = 0,
     other_anchor_jxy: float = 0.0,
@@ -951,6 +953,7 @@ def impulse_response_diagnostics(
     metadata: AsymmetricAnchorMetadata,
     *,
     input_amplitude: float,
+    readout_axis: str = "Y",
     max_delay: int | None = None,
     reference_input: float = 0.0,
     mode: AnchorMode | None = None,
@@ -960,8 +963,9 @@ def impulse_response_diagnostics(
     """Measure the exact delayed local response after one anchor input pulse.
 
     The memory starts at the exact reference-input fixed point.  A one-step
-    input pulse is applied, followed by reference-input updates.  ``X_r`` is
-    evaluated through Eq. (16), so this is an exact channel-level impulse
+    input pulse is applied, followed by reference-input updates.  The selected
+    readout quadrature (``Y_r`` by default) is evaluated through Eq. (16), so
+    this is an exact channel-level impulse
     response rather than a trained-task score.  The modal curve is calibrated
     at delay one and propagated with the exact selected eigenvalue.
     """
@@ -988,6 +992,7 @@ def impulse_response_diagnostics(
         model,
         selected_mode,
         readout_local_index=metadata.readout_local_index,
+        readout_axis=readout_axis,
         reference_input=float(reference_input),
     )
     stationary = model.fixed_point()
@@ -1052,6 +1057,7 @@ def impulse_response_diagnostics(
         "source_amplitude_abs": float(abs(source_amplitude)),
         "state_mode_amplitude_abs": float(abs(state_amplitude)),
         "readout_mode_amplitude_abs": float(abs(readout_amplitude)),
+        "readout_axis": str(readout_axis).upper(),
         "mode": selected_mode,
         "visibility": visibility,
     }

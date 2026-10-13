@@ -8,7 +8,12 @@ from itertools import combinations, product
 import numpy as np
 import scipy.linalg as la
 
-from .config import GlobalFloquetConfig, InputEncodingConfig, PartialShadowReadoutConfig, ReadoutResetConfig
+from .config import (
+    GlobalFloquetConfig,
+    InputEncodingConfig,
+    PartialShadowReadoutConfig,
+    ReadoutResetConfig,
+)
 from .dynamics import (
     build_drive_hamiltonian,
     build_global_h0,
@@ -18,9 +23,9 @@ from .dynamics import (
     density_zero,
     generate_hamiltonian_parameters,
     input_beta_array,
+    parse_pauli_operator,
     partial_trace_qubits,
     pauli_string,
-    parse_pauli_operator,
     project_density,
     reorder_qubit_operator,
     resolve_input_qubits,
@@ -154,7 +159,7 @@ class GlobalFloquetPartialShadowReservoir:
         else:
             if not isinstance(self.input_config.beta, (int, float, np.floating)):
                 raise ValueError("operator input encoding requires scalar beta.")
-            self.input_qubits = tuple()
+            self.input_qubits = ()
             self.input_axis = validate_axis(self.input_config.axis, "input axis")
             self.beta = np.asarray([float(self.input_config.beta)], dtype=float)
             self.input_operator = parse_pauli_operator(
@@ -171,6 +176,7 @@ class GlobalFloquetPartialShadowReservoir:
         )
         self._rng_seed = int(self.shadow_config.seed if seed_simulator is None else seed_simulator)
         self.last_raw_shots: dict[str, np.ndarray] | None = None
+        self.last_readout_state: np.ndarray | None = None
         self.reset_state()
 
     def reset_state(self) -> None:
@@ -179,6 +185,7 @@ class GlobalFloquetPartialShadowReservoir:
         self.rho_memory = density_zero(self.n_memory)
         self._shadow_rng = np.random.default_rng(self._rng_seed)
         self.last_raw_shots = None
+        self.last_readout_state = None
 
     def _readout_reset_state(self) -> np.ndarray:
         if self.reset_config.reset_state == "zero":
@@ -265,6 +272,9 @@ class GlobalFloquetPartialShadowReservoir:
         """Apply one reservoir step and return one feature vector."""
 
         rho_pre = self._pre_measurement_state(self.rho_memory, float(u))
+        self.last_readout_state = project_density(
+            self._reduced_state(rho_pre, "readout")
+        )
         if self.shadow_config.exact_expectations or not self.shadow_config.return_shadow_estimates:
             features = self.exact_features_from_state(rho_pre)
         else:

@@ -95,9 +95,11 @@ result = qres.Experiment(reservoir, dataset, readout=qres.Ridge()).run()
 ```
 
 Use `qres.run(reservoir, inputs)` instead when only the feature matrix is
-needed. Do not normally call it immediately before `Experiment.run()` on the
-same reservoir: the experiment runs the complete input stream itself, and some
-reservoir implementations retain their memory state between calls.
+needed. Built-in full-stream methods reset before processing an independent
+stream; call `step(...)` directly when intentionally continuing a trajectory.
+Custom reservoir objects remain responsible for defining their own reset
+semantics. Do not normally call `qres.run(...)` immediately before
+`Experiment.run()`, because the experiment runs the complete stream itself.
 
 The internal code is organized to support that surface.
 

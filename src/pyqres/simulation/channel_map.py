@@ -157,6 +157,7 @@ class ChannelMapReservoir:
     def reset(self, rhoS0: np.ndarray | None = None) -> None:
         """Reset the memory state before a new stream or message."""
 
+        self.rng = np.random.default_rng(self.cfg.seed)
         if rhoS0 is None:
             self.rhoS = self.core.initial_system_density(self.cfg.init_state)
         else:
@@ -240,9 +241,14 @@ class ChannelMapReservoir:
         return probs
 
     def run(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
-        """Run a full input stream and stack one feature row per time step."""
+        """Reset, run a full input stream, and stack one feature row per step.
+
+        Use :meth:`step` directly when intentionally continuing an existing
+        memory trajectory.
+        """
 
         values = _as_input_vector(inputs)
+        self.reset()
         if values.size == 0:
             width = self.core.dim_ancilla + int(bool(self.cfg.include_bias))
             return np.empty((0, width), dtype=float)
@@ -325,6 +331,7 @@ class ObservableChannelMapReservoir(ChannelMapReservoir):
 
     def run(self, inputs: list[float] | tuple[float, ...] | np.ndarray) -> np.ndarray:
         values = _as_input_vector(inputs)
+        self.reset()
         if values.size == 0:
             width = len(self._readout_observables) + int(bool(self.cfg.include_bias))
             return np.empty((0, width), dtype=float)

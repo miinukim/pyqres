@@ -10,7 +10,6 @@ import numpy as np
 
 from .dynamics import PAULI, kron_all, pauli_string
 
-
 PauliLabel = tuple[tuple[int, str], ...]
 
 
@@ -128,7 +127,7 @@ def sample_partial_shadow_features(
     if int(shots) <= 0:
         raise ValueError("shots must be positive.")
     rho = np.asarray(rho_readout, dtype=complex)
-    n_readout = int(round(np.log2(rho.shape[0])))
+    n_readout = round(np.log2(rho.shape[0]))
     if rho.shape != (2**n_readout, 2**n_readout):
         raise ValueError("rho_readout must be a square 2**n_readout matrix.")
     kind = str(measurement_type).lower()
@@ -140,23 +139,33 @@ def sample_partial_shadow_features(
 
     local_rng = np.random.default_rng(seed) if rng is None else rng
     axes_all = np.asarray(["X", "Y", "Z"], dtype="U1")
-    estimates = np.zeros((int(shots), len(labels)), dtype=float)
-    axes_record = np.empty((int(shots), n_readout), dtype="U1")
-    outcomes_record = np.empty((int(shots), n_readout), dtype=np.int8)
-    for shot in range(int(shots)):
-        axes = local_rng.choice(axes_all, size=n_readout)
+    n_shots = int(shots)
+    axes_record = local_rng.choice(axes_all, size=(n_shots, n_readout))
+    outcomes_record = np.empty((n_shots, n_readout), dtype=np.int8)
+
+    # There are only 3**n_readout distinct local basis settings. Grouping shots
+    # avoids rebuilding the same POVM effects once per shot (1024 shots on
+    # three readout qubits reduces from 1024 to at most 27 probability calls).
+    basis_settings, inverse = np.unique(axes_record, axis=0, return_inverse=True)
+    for basis_index, axes in enumerate(basis_settings):
+        shot_indices = np.flatnonzero(inverse == basis_index)
         outcomes, probs = outcome_probabilities(rho, axes, strength)
-        sampled = outcomes[int(local_rng.choice(len(outcomes), p=probs))]
-        axes_record[shot] = axes
-        outcomes_record[shot] = np.asarray(sampled, dtype=np.int8)
-        for col, label in enumerate(labels):
-            value = 1.0
-            for qubit, pauli in label:
-                if str(axes[int(qubit)]) != str(pauli):
-                    value = 0.0
-                    break
-                value *= 3.0 * float(sampled[int(qubit)]) / strength
-            estimates[shot, col] = value
+        sampled_indices = local_rng.choice(
+            len(outcomes), size=len(shot_indices), p=probs
+        )
+        outcomes_record[shot_indices] = np.asarray(outcomes, dtype=np.int8)[
+            sampled_indices
+        ]
+
+    estimates = np.zeros((n_shots, len(labels)), dtype=float)
+    for col, label in enumerate(labels):
+        matched = np.ones(n_shots, dtype=bool)
+        values = np.ones(n_shots, dtype=float)
+        for qubit, pauli in label:
+            qubit = int(qubit)
+            matched &= axes_record[:, qubit] == str(pauli)
+            values *= 3.0 * outcomes_record[:, qubit].astype(float) / strength
+        estimates[matched, col] = values[matched]
     features = estimates.mean(axis=0)
     if include_bias:
         features = np.asarray([1.0, *features], dtype=float)
@@ -194,7 +203,7 @@ def group_basis_schedules(schedules: np.ndarray) -> list[tuple[np.ndarray, int, 
     out = []
     for indices in groups.values():
         shot_indices = np.asarray(indices, dtype=int)
-        out.append((arr[indices[0]].copy(), int(len(indices)), shot_indices))
+        out.append((arr[indices[0]].copy(), len(indices), shot_indices))
     return out
 
 

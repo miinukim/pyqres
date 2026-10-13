@@ -59,6 +59,7 @@ class SharedExactStreamingReservoir:
     def reset(self, rhoS0: np.ndarray | None = None) -> None:
         """Reset the joint state before processing one stream/message."""
 
+        self.rng = np.random.default_rng(self.core.cfg.seed)
         if rhoS0 is None:
             rho_system = self.core.initial_system_density(self.init_state)
         else:
@@ -135,9 +136,18 @@ class SharedExactStreamingReservoir:
         return np.asarray(feats, dtype=float)
 
     def run_stream(self, inputs: Sequence[float]) -> np.ndarray:
-        """Run a full input stream and stack one feature row per step."""
+        """Reset and run a full input stream, returning one row per step."""
 
-        x = np.vstack([self.step(float(u)) for u in inputs])
+        self.reset()
+        values = [self.step(float(u)) for u in inputs]
+        if not values:
+            width = int(self.include_bias)
+            if self.readout_mode == "ancilla_probs":
+                width += self.core.dim_ancilla
+            else:
+                width += len(self.observables)
+            return np.empty((0, width), dtype=float)
+        x = np.vstack(values)
         if not np.isfinite(x).all():
             raise FloatingPointError("Non-finite features from shared exact streaming reservoir.")
         return x
@@ -209,7 +219,12 @@ class MemoryObservableStreamingReservoir:
         """Run a full input stream and stack one feature row per step."""
 
         self.reset()
-        features = np.vstack([self.step(float(u)) for u in inputs])
+        values = [self.step(float(u)) for u in inputs]
+        if not values:
+            return np.empty(
+                (0, len(self.observables) + int(self.include_bias)), dtype=float
+            )
+        features = np.vstack(values)
         return ensure_finite("memory-observable streaming feature matrix", features)
 
     def transform(self, inputs: Sequence[float]) -> np.ndarray:

@@ -67,6 +67,9 @@ def build_hamiltonian_params(spec: ReservoirSpec) -> dict[str, Any]:
     source_kind = spec.source_kind.lower()
     dynamics_kind = spec.dynamics.kind.lower()
     if source_kind == "hamiltonian" or dynamics_kind == "hamiltonian":
+        # input_scale controls the runtime coefficient multiplying H1; it is
+        # not a ReservoirParams Hamiltonian-construction argument.
+        kwargs.pop("input_scale", None)
         kwargs.setdefault("n_system", spec.system_qubits)
         kwargs.setdefault("n_ancilla", spec.ancilla_qubits)
         kwargs.setdefault("tau", float(spec.tau))

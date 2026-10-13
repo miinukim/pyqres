@@ -483,6 +483,77 @@ def test_dictionary_explicit_hamiltonian_is_not_preset_bound():
     assert features.shape == (3, 2)
 
 
+def test_explicit_hamiltonian_encoding_scale_controls_runtime_input():
+    import numpy as np
+    import pyqres as qres
+
+    identity = np.eye(2, dtype=complex)
+    pauli_x = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
+    h0 = np.zeros((4, 4), dtype=complex)
+    h1 = np.kron(identity, pauli_x)
+
+    def build(scale):
+        builder = qres.qresreservoir.builder_from_dict(
+            {
+                "memory_qubits": 1,
+                "readout_qubits": 1,
+                "tau": 0.7,
+                "encoding": {"mode": "hamiltonian", "scale": scale},
+                "dynamics": {"kind": "hamiltonian", "h0": h0, "h1": h1},
+                "readout": {
+                    "mode": "ancilla_probabilities",
+                    "include_bias": False,
+                    "init_state": "zero",
+                },
+                "backend": "channel_map",
+            }
+        )
+        return builder, builder.build()
+
+    zero_builder, zero_reservoir = build(0.0)
+    driven_builder, driven_reservoir = build(1.5)
+    zero_features = zero_reservoir.run([0.8])
+    driven_features = driven_reservoir.run([0.8])
+
+    assert zero_builder.spec.input_scale == 0.0
+    assert driven_builder.spec.input_scale == 1.5
+    assert zero_reservoir.core.cfg.input_scale == 0.0
+    assert driven_reservoir.core.cfg.input_scale == 1.5
+    assert not np.allclose(zero_features, driven_features)
+
+
+def test_channel_map_full_stream_calls_reset_and_replay():
+    import numpy as np
+    import pyqres as qres
+
+    pauli_x = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex)
+    pauli_z = np.diag([1.0, -1.0]).astype(complex)
+    h0 = 0.37 * np.kron(pauli_x, pauli_x) + 0.21 * np.kron(
+        pauli_z, np.eye(2)
+    )
+    h1 = np.kron(np.eye(2), pauli_z)
+    reservoir = qres.qresreservoir.from_dict(
+        {
+            "memory_qubits": 1,
+            "readout_qubits": 1,
+            "tau": 0.7,
+            "dynamics": {"kind": "hamiltonian", "h0": h0, "h1": h1},
+            "readout": {
+                "mode": "ancilla_probabilities",
+                "include_bias": True,
+                "init_state": "zero",
+            },
+            "backend": "channel_map",
+        }
+    )
+    inputs = np.array([0.2, -0.1, 0.7, 0.4])
+
+    first = qres.run(reservoir, inputs)
+    second = qres.run(reservoir, inputs)
+
+    np.testing.assert_allclose(first, second, atol=1e-13)
+
+
 def test_dimension_presets_are_presets_not_core_families():
     import numpy as np
     import pyqres as qres

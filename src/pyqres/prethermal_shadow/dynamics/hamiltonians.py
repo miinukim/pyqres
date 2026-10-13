@@ -100,6 +100,59 @@ def build_fast_period_unitary(
     return u_minus @ u_plus
 
 
+def _validated_segments(hamiltonians, durations):
+    matrices = tuple(np.asarray(h, dtype=complex) for h in hamiltonians)
+    times = np.asarray(durations, dtype=float)
+    if not matrices or times.shape != (len(matrices),):
+        raise ValueError("Specify one duration per Hamiltonian segment")
+    if not np.isfinite(times).all() or np.any(times <= 0):
+        raise ValueError("Segment durations must be finite and positive")
+    shape = matrices[0].shape
+    if len(shape) != 2 or shape[0] != shape[1] or shape[0] == 0:
+        raise ValueError("Hamiltonians must be nonempty square matrices")
+    for h in matrices:
+        if h.shape != shape or not np.isfinite(h).all():
+            raise ValueError("Hamiltonians must be finite and have equal shapes")
+        if not np.allclose(h, h.conj().T, rtol=1e-12, atol=1e-12):
+            raise ValueError("Hamiltonians must be Hermitian")
+    return matrices, times
+
+
+def build_piecewise_period_unitary(
+    hamiltonians: Sequence[np.ndarray], durations: Sequence[float]
+) -> np.ndarray:
+    """Time-ordered propagation for arbitrary piecewise-constant controls.
+
+    Inputs are in chronological order; the earliest exponential acts first
+    and is rightmost in the returned product. Each matrix is the complete
+    segment Hamiltonian, including any always-on static Hamiltonian.
+    """
+    matrices, times = _validated_segments(hamiltonians, durations)
+    unitary = np.eye(matrices[0].shape[0], dtype=complex)
+    for h, duration in zip(matrices, times, strict=True):
+        unitary = la.expm(-1j * duration * h) @ unitary
+    return unitary
+
+
+def piecewise_effective_hamiltonian_first_order(
+    hamiltonians: Sequence[np.ndarray], durations: Sequence[float]
+) -> np.ndarray:
+    """Stroboscopic Magnus Hamiltonian through first order in the period.
+
+    H_eff = sum(dt_j H_j)/T - i/(2T) sum_{j>k} dt_j dt_k [H_j,H_k].
+    The initial drive phase is the start of the first listed segment.
+    """
+    matrices, times = _validated_segments(hamiltonians, durations)
+    period = float(times.sum())
+    result = sum(t * h for t, h in zip(times, matrices, strict=True)) / period
+    for j, h in enumerate(matrices):
+        for k in range(j):
+            result = result - .5j * times[j] * times[k] / period * (
+                h @ matrices[k] - matrices[k] @ h
+            )
+    return result
+
+
 def build_step_unitary(
     cfg: GlobalFloquetConfig, h0: np.ndarray, drive: np.ndarray
 ) -> np.ndarray:

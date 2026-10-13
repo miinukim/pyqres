@@ -21,6 +21,14 @@ from .channel_map import (
 )
 from .exact_qrc import ExactQRCModel, ExactQRCModelConfig
 from .hardware import HardwareTrajectoryReservoir, HardwareTrajectoryReservoirConfig
+from .hu_ising import (
+    HuIsingConfig,
+    HuIsingReservoir,
+    IsingReservoir,
+    IsingReservoirConfig,
+)
+from .scrambling_circuit import ScramblingCircuitConfig, ScramblingCircuitReservoir
+from .syk import SYKReservoir, SYKReservoirConfig
 
 __all__ = [
     "ChannelMapReservoir",
@@ -30,10 +38,18 @@ __all__ = [
     "HamiltonianSpec",
     "HardwareTrajectoryReservoir",
     "HardwareTrajectoryReservoirConfig",
+    "HuIsingConfig",
+    "HuIsingReservoir",
+    "IsingReservoir",
+    "IsingReservoirConfig",
     "MeasurementControlConfig",
     "ObservableChannelMapReservoir",
     "ObservableChannelMapReservoirConfig",
     "PauliTerm",
     "ReservoirParams",
+    "SYKReservoir",
+    "SYKReservoirConfig",
+    "ScramblingCircuitConfig",
+    "ScramblingCircuitReservoir",
     "parse_readout_observable",
 ]

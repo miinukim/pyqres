@@ -204,6 +204,13 @@ def _spec_from_parts(
     parameters = dict(dynamics.parameters)
     updates = _promoted_spec_updates(parameters)
     preset_key = str(dynamics.name or preset_name).lower()
+    if kind == "hamiltonian":
+        # Explicit Hamiltonians keep H1 independent of the input convention.
+        # The encoding scale is therefore the runtime multiplier in
+        # H(u) = H0 + scale * u * H1.  Named presets instead translate the
+        # encoding metadata while constructing H1, so applying this update to
+        # presets would scale their input twice.
+        updates.setdefault("input_scale", float(encoding.scale))
     if n_memory is not None:
         updates.update({"n_memory": int(n_memory), "n_system": int(n_memory)})
     if n_readout is not None:

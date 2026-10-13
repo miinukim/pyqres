@@ -436,6 +436,37 @@ For customization, public helpers live in:
 - `pyqres.prethermal_shadow.diagnostics`: projected memory-channel
   spectrum summaries and empirical OVD helpers
 
+The dense dynamics helpers also accept arbitrary piecewise-constant schedules,
+including noncommuting many-qubit drive terms and unequal segment durations.
+Given a nine-qubit static matrix `h0`, this constructs the four-step readout
+drive on physical sites 6, 7, and 8:
+
+```python
+import numpy as np
+from pyqres.prethermal_shadow.dynamics import (
+    build_piecewise_period_unitary,
+    piecewise_effective_hamiltonian_first_order,
+    pauli_string,
+)
+
+A, omega, cycles = 1.0, 25.0, 15
+T = 2 * np.pi / omega
+v1 = A * pauli_string(9, [(6, "X"), (7, "X")])
+v2 = pauli_string(9, [(7, "Y"), (8, "X")])
+segments = [h0 + v1, h0 + v2, h0 - v1, h0 - v2]
+durations = [T / 4] * 4
+u_period = build_piecewise_period_unitary(segments, durations)
+u_update = np.linalg.matrix_power(u_period, cycles)
+h_first_order = piecewise_effective_hamiltonian_first_order(segments, durations)
+```
+
+Supply complete segment Hamiltonians in chronological order; the first
+exponential acts first and appears rightmost in the product. `u_update` can be
+passed to the unitary-based reset reservoir used by the
+[noncommuting-drive MG experiment](../exp/mackey_glass_noncommuting_drive.py).
+These helpers build dense matrices; the standard configuration and circuit
+backend retain their two-segment square-drive protocol.
+
 ## Option Reference
 
 ### `qres.qresreservoir.from_dict(config)`
